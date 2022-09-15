@@ -44,15 +44,36 @@ type collector struct {
 }
 
 // config is added here to allow for options expansion in the future.
-type config struct{}
+type config struct {
+	registerer prometheus.Registerer
+}
 
-// Option may be used in the future to apply options to a Prometheus Exporter config.
+// optionFunc applies a set of options to a config.
+type optionFunc func(config) config
+
+// apply returns a config with option(s) applied.
+func (o optionFunc) apply(conf config) config {
+	return o(conf)
+}
+
+// Option applies options to a Prometheus Exporter config.
 type Option interface {
 	apply(config) config
 }
 
+func WithRegisterer(registerer prometheus.Registerer) Option {
+	return optionFunc(func(o config) config {
+		o.registerer = registerer
+		return o
+	})
+}
+
 // New returns a Prometheus Exporter.
-func New(_ ...Option) Exporter {
+func New(opts ...Option) (Exporter, error) {
+	var conf config
+	for _, o := range opts {
+		conf = o.apply(conf)
+	}
 	// this assumes that the default temporality selector will always return cumulative.
 	// we only support cumulative temporality, so building our own reader enforces this.
 	reader := metric.NewManualReader()
@@ -62,7 +83,13 @@ func New(_ ...Option) Exporter {
 			Reader: reader,
 		},
 	}
-	return e
+	if conf.registerer != nil {
+		err := conf.registerer.Register(e.Collector)
+		if err != nil {
+			return e, err
+		}
+	}
+	return e, nil
 }
 
 // Describe implements prometheus.Collector.
