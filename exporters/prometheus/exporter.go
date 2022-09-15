@@ -19,11 +19,13 @@ package prometheus // import "go.opentelemetry.io/otel/exporters/prometheus"
 
 import (
 	"context"
+	"net/http"
 	"sort"
 	"strings"
 	"unicode"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -35,7 +37,7 @@ import (
 // interface for easy instantiation with a MeterProvider.
 type Exporter struct {
 	metric.Reader
-	Collector prometheus.Collector
+	http.Handler
 }
 
 // collector is used to implement prometheus.Collector.
@@ -52,17 +54,19 @@ type Option interface {
 }
 
 // New returns a Prometheus Exporter.
-func New(_ ...Option) Exporter {
+func New(_ ...Option) (Exporter, error) {
 	// this assumes that the default temporality selector will always return cumulative.
 	// we only support cumulative temporality, so building our own reader enforces this.
 	reader := metric.NewManualReader()
+	registry := prometheus.NewRegistry()
 	e := Exporter{
-		Reader: reader,
-		Collector: &collector{
-			Reader: reader,
-		},
+		Reader:  reader,
+		Handler: promhttp.HandlerFor(registry, promhttp.HandlerOpts{}),
 	}
-	return e
+	err := registry.Register(&collector{
+		Reader: reader,
+	})
+	return e, err
 }
 
 // Describe implements prometheus.Collector.
