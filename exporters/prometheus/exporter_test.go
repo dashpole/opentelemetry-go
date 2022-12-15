@@ -28,8 +28,10 @@ import (
 	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/instrument"
 	"go.opentelemetry.io/otel/metric/unit"
+	"go.opentelemetry.io/otel/sdk/instrumentation"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/aggregation"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
 )
@@ -647,4 +649,60 @@ func TestDuplicateMetrics(t *testing.T) {
 			require.Truef(t, match, "expected export not produced: %v", err)
 		})
 	}
+}
+
+type fakeProducer struct {
+	data []metricdata.ScopeMetrics
+}
+
+func (f *fakeProducer) Produce(context.Context) ([]metricdata.ScopeMetrics, error) {
+	return f.data, nil
+}
+
+func TestMetricProducer(t *testing.T) {
+	p := &fakeProducer{data: []metricdata.ScopeMetrics{{
+		Scope: instrumentation.Scope{
+			Name: "go.opentelemetry.io/otel/exporters/prometheus",
+		},
+		Metrics: []metricdata.Metrics{
+			{
+				Name:        "with.producer",
+				Description: "this metric came from an external producer",
+				Data: metricdata.Gauge[int64]{
+					DataPoints: []metricdata.DataPoint[int64]{
+						{
+							Attributes: attribute.NewSet(),
+							Value:      123,
+						},
+					},
+				},
+			},
+		},
+	}}}
+	// initialize registry exporter
+	ctx := context.Background()
+	registry := prometheus.NewRegistry()
+	exporter, err := New(WithMetricProducers(p), WithRegisterer(registry))
+	require.NoError(t, err)
+
+	// initialize resource
+	res, err := resource.New(ctx,
+		resource.WithAttributes(semconv.ServiceNameKey.String("prometheus_test")),
+		resource.WithAttributes(semconv.TelemetrySDKVersionKey.String("latest")),
+	)
+	require.NoError(t, err)
+	res, err = resource.Merge(resource.Default(), res)
+	require.NoError(t, err)
+
+	// initialize provider, but don't record any metrics
+	metric.NewMeterProvider(
+		metric.WithReader(exporter),
+		metric.WithResource(res),
+	)
+	file, ferr := os.Open("testdata/with_metric_producer.txt")
+	require.NoError(t, ferr)
+	t.Cleanup(func() { require.NoError(t, file.Close()) })
+
+	err = testutil.GatherAndCompare(registry, file)
+	require.NoError(t, err)
 }

@@ -1,0 +1,9 @@
+# HELP otel_scope_info Instrumentation Scope metadata
+# TYPE otel_scope_info gauge
+otel_scope_info{otel_scope_name="go.opentelemetry.io/otel/exporters/prometheus",otel_scope_version=""} 1
+# HELP target_info Target metadata
+# TYPE target_info gauge
+target_info{service_name="prometheus_test",telemetry_sdk_language="go",telemetry_sdk_name="opentelemetry",telemetry_sdk_version="latest"} 1
+# HELP with_producer this metric came from an external producer
+# TYPE with_producer gauge
+with_producer{otel_scope_name="go.opentelemetry.io/otel/exporters/prometheus",otel_scope_version=""} 123

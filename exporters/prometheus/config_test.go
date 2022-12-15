@@ -15,6 +15,7 @@
 package prometheus // import "go.opentelemetry.io/otel/exporters/prometheus"
 
 import (
+	"context"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -22,6 +23,7 @@ import (
 
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/aggregation"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 func TestNewConfig(t *testing.T) {
@@ -99,6 +101,17 @@ func TestNewConfig(t *testing.T) {
 				withoutUnits: true,
 			},
 		},
+		{
+			name: "metric producers",
+			options: []Option{
+				WithMetricProducers(testProducer{id: "a"}, testProducer{id: "b"}),
+				WithMetricProducers(testProducer{id: "c"}),
+			},
+			wantConfig: config{
+				registerer: prometheus.DefaultRegisterer,
+				producers:  []metric.Producer{testProducer{id: "a"}, testProducer{id: "b"}, testProducer{id: "c"}},
+			},
+		},
 	}
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -109,6 +122,14 @@ func TestNewConfig(t *testing.T) {
 			assert.Equal(t, tt.wantConfig, cfg)
 		})
 	}
+}
+
+type testProducer struct {
+	id string
+}
+
+func (t testProducer) Produce(context.Context) ([]metricdata.ScopeMetrics, error) {
+	return nil, nil
 }
 
 func TestConfigManualReaderOptions(t *testing.T) {

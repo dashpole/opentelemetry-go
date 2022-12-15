@@ -27,6 +27,7 @@ type config struct {
 	withoutUnits      bool
 	aggregation       metric.AggregationSelector
 	disableScopeInfo  bool
+	producers         []metric.Producer
 }
 
 // newConfig creates a validated config configured with options.
@@ -115,4 +116,15 @@ func WithoutScopeInfo() Option {
 		cfg.disableScopeInfo = true
 		return cfg
 	})
+}
+
+// WithMetricProducers configure the exporter to export metrics from the
+// provided producers in addition to collecting metrics from OpenTelemetry
+// instruments.
+func WithMetricProducers(producers ...metric.Producer) Option {
+	return optionFunc(func(cfg config) config {
+		cfg.producers = append(cfg.producers, producers...)
+		return cfg
+	})
+
 }

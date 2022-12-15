@@ -81,6 +81,9 @@ func New(opts ...Option) (*Exporter, error) {
 	// we only support cumulative temporality, so building our own reader enforces this.
 	// TODO (#3244): Enable some way to configure the reader, but not change temporality.
 	reader := metric.NewManualReader(cfg.manualReaderOptions()...)
+	for _, producer := range cfg.producers {
+		reader.RegisterProducer(producer)
+	}
 
 	collector := &collector{
 		reader:            reader,
