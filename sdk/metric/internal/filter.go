@@ -119,12 +119,7 @@ func (f *precomputedFilter[N]) Aggregate(measurement N, attr attribute.Set) {
 		fAttr, _ = attr.Filter(f.filter)
 		f.seen[attr] = fAttr
 	}
-	if fAttr.Equals(&attr) {
-		// No filtering done.
-		f.aggregator.Aggregate(measurement, fAttr)
-	} else {
-		f.aggregator.aggregateFiltered(measurement, fAttr)
-	}
+	f.aggregator.aggregateFiltered(measurement, fAttr)
 }
 
 // Aggregation returns an Aggregation, for all the aggregated
