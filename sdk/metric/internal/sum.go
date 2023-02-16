@@ -22,6 +22,10 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
+const maxTimeSeries = 100
+
+var overflowAttrs = attribute.NewSet(attribute.Bool("overflow", true))
+
 // valueMap is the storage for sums.
 type valueMap[N int64 | float64] struct {
 	sync.Mutex
@@ -34,6 +38,9 @@ func newValueMap[N int64 | float64]() *valueMap[N] {
 
 func (s *valueMap[N]) Aggregate(value N, attr attribute.Set) {
 	s.Lock()
+	if _, ok := s.values[attr]; !ok && len(s.values) >= maxTimeSeries {
+		attr = overflowAttrs
+	}
 	s.values[attr] += value
 	s.Unlock()
 }
@@ -190,6 +197,9 @@ func newPrecomputedMap[N int64 | float64]() *precomputedMap[N] {
 //     recorded along side that value.
 func (s *precomputedMap[N]) Aggregate(value N, attr attribute.Set) {
 	s.Lock()
+	if _, ok := s.values[attr]; !ok && len(s.values) >= maxTimeSeries {
+		attr = overflowAttrs
+	}
 	v := s.values[attr]
 	v.measured = value
 	s.values[attr] = v
@@ -209,6 +219,9 @@ func (s *precomputedMap[N]) Aggregate(value N, attr attribute.Set) {
 // filter.
 func (s *precomputedMap[N]) aggregateFiltered(value N, attr attribute.Set) { // nolint: unused  // Used to agg filtered.
 	s.Lock()
+	if _, ok := s.values[attr]; !ok && len(s.values) >= maxTimeSeries {
+		attr = overflowAttrs
+	}
 	v := s.values[attr]
 	v.filtered += value
 	s.values[attr] = v
