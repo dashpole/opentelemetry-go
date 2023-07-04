@@ -25,6 +25,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Count the Collect time in the PeriodicReader timeout. (#4221)
 - `New` in `go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc` returns `*Exporter` instead of `"go.opentelemetry.io/otel/sdk/metric".Exporter`. (#4272)
 - `New` in `go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp` returns `*Exporter` instead of `"go.opentelemetry.io/otel/sdk/metric".Exporter`. (#4272)
+- If an attribute set is omitted from an async callback, the previous value will no longer be exported. (#4289)
+- If an attribute set is Observed multiple times in an async callback, the values will be summed instead of the last observation winning. (#4289)
 
 ### Fixed
 
