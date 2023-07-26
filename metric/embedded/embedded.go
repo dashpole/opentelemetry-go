@@ -79,6 +79,16 @@ type Int64Observer interface{ int64Observer() }
 // version bump of the API package).
 type Observer interface{ observer() }
 
+// BridgeObserver is embedded in [go.opentelemetry.io/otel/metric.BridgeObserver].
+//
+// Embed this interface in your implementation of the
+// [go.opentelemetry.io/otel/metric.BridgeObserver] if you want users to experience a
+// compilation error, signaling they need to update to your latest
+// implementation, when the [go.opentelemetry.io/otel/metric.BridgeObserver]
+// interface is extended (which is something that can happen without a major
+// version bump of the API package).
+type BridgeObserver interface{ observer() }
+
 // Registration is embedded in [go.opentelemetry.io/otel/metric.Registration].
 //
 // Embed this interface in your implementation of the

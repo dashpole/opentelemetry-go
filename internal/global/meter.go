@@ -104,7 +104,8 @@ type meter struct {
 	mtx         sync.Mutex
 	instruments []delegatedInstrument
 
-	registry list.List
+	registry       list.List
+	bridgeRegistry list.List
 
 	delegate atomic.Value // metric.Meter
 }
@@ -293,6 +294,26 @@ func (m *meter) RegisterCallback(f metric.Callback, insts ...metric.Observable) 
 	return reg, nil
 }
 
+// RegisterBridgeCallback TODO.
+func (m *meter) RegisterBridgeCallback(f metric.BridgeCallback) (metric.Registration, error) {
+	if del, ok := m.delegate.Load().(metric.Meter); ok {
+		return del.RegisterBridgeCallback(f)
+	}
+
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	reg := &bridgeRegistration{function: f}
+	e := m.bridgeRegistry.PushBack(reg)
+	reg.unreg = func() error {
+		m.mtx.Lock()
+		_ = m.bridgeRegistry.Remove(e)
+		m.mtx.Unlock()
+		return nil
+	}
+	return reg, nil
+}
+
 type wrapped interface {
 	unwrap() metric.Observable
 }
@@ -309,6 +330,45 @@ func unwrapInstruments(instruments []metric.Observable) []metric.Observable {
 	}
 
 	return out
+}
+
+type bridgeRegistration struct {
+	embedded.Registration
+
+	function metric.BridgeCallback
+
+	unreg   func() error
+	unregMu sync.Mutex
+}
+
+func (c *bridgeRegistration) setDelegate(m metric.Meter) {
+	c.unregMu.Lock()
+	defer c.unregMu.Unlock()
+
+	if c.unreg == nil {
+		// Unregister already called.
+		return
+	}
+
+	reg, err := m.RegisterBridgeCallback(c.function)
+	if err != nil {
+		GetErrorHandler().Handle(err)
+	}
+
+	c.unreg = reg.Unregister
+}
+
+func (c *bridgeRegistration) Unregister() error {
+	c.unregMu.Lock()
+	defer c.unregMu.Unlock()
+	if c.unreg == nil {
+		// Unregister already called.
+		return nil
+	}
+
+	var err error
+	err, c.unreg = c.unreg(), nil
+	return err
 }
 
 type registration struct {

@@ -52,7 +52,8 @@ type testMeter struct {
 	siUDCount int
 	siHist    int
 
-	callbacks []metric.Callback
+	callbacks       []metric.Callback
+	bridgeCallbacks []metric.BridgeCallback
 }
 
 func (m *testMeter) Int64Counter(name string, options ...metric.Int64CounterOption) (metric.Int64Counter, error) {
@@ -121,6 +122,16 @@ func (m *testMeter) RegisterCallback(f metric.Callback, i ...metric.Observable) 
 	return testReg{
 		f: func(idx int) func() {
 			return func() { m.callbacks[idx] = nil }
+		}(len(m.callbacks) - 1),
+	}, nil
+}
+
+// RegisterCallback captures the bridge function that will be called during Collect.
+func (m *testMeter) RegisterBridgeCallback(f metric.BridgeCallback) (metric.Registration, error) {
+	m.bridgeCallbacks = append(m.bridgeCallbacks, f)
+	return testReg{
+		f: func(idx int) func() {
+			return func() { m.bridgeCallbacks[idx] = nil }
 		}(len(m.callbacks) - 1),
 	}, nil
 }

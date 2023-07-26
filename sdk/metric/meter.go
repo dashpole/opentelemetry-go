@@ -339,6 +339,11 @@ func (m *meter) RegisterCallback(f metric.Callback, insts ...metric.Observable) 
 	return m.pipes.registerMultiCallback(cback), err
 }
 
+func (m *meter) RegisterBridgeCallback(f metric.BridgeCallback) (metric.Registration, error) {
+	// TODO
+	return unregisterFuncs{}, nil
+}
+
 type observer struct {
 	embedded.Observer
 

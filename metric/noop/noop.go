@@ -146,6 +146,11 @@ func (Meter) RegisterCallback(metric.Callback, ...metric.Observable) (metric.Reg
 	return Registration{}, nil
 }
 
+// RegisterCallback performs no operation.
+func (Meter) RegisterBridgeCallback(metric.BridgeCallback) (metric.Registration, error) {
+	return Registration{}, nil
+}
+
 // Observer acts as a recorder of measurements for multiple instruments in a
 // Callback, it performing no operation.
 type Observer struct{ embedded.Observer }

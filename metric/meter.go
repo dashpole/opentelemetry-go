@@ -18,6 +18,7 @@ import (
 	"context"
 
 	"go.opentelemetry.io/otel/metric/embedded"
+	"go.opentelemetry.io/otel/metric/metricdata"
 )
 
 // MeterProvider provides access to named Meter instances, for instrumenting
@@ -160,6 +161,9 @@ type Meter interface {
 	//
 	// The function f needs to be concurrent safe.
 	RegisterCallback(f Callback, instruments ...Observable) (Registration, error)
+
+	// RegisterBridgeCallback TODO
+	RegisterBridgeCallback(f BridgeCallback) (Registration, error)
 }
 
 // Callback is a function registered with a Meter that makes observations for
@@ -176,6 +180,9 @@ type Meter interface {
 // The function needs to be concurrent safe.
 type Callback func(context.Context, Observer) error
 
+// BridgeCallback TODO.
+type BridgeCallback func(context.Context, BridgeObserver) error
+
 // Observer records measurements for multiple instruments in a Callback.
 //
 // Warning: Methods may be added to this interface in minor releases. See
@@ -191,6 +198,17 @@ type Observer interface {
 	ObserveFloat64(obsrv Float64Observable, value float64, opts ...ObserveOption)
 	// ObserveInt64 records the int64 value for obsrv.
 	ObserveInt64(obsrv Int64Observable, value int64, opts ...ObserveOption)
+}
+
+// BridgeObserver TODO.
+type BridgeObserver interface {
+	// Users of the interface can ignore this. This embedded type is only used
+	// by implementations of this interface. See the "API Implementations"
+	// section of the package documentation for more information.
+	embedded.BridgeObserver
+
+	// ObserveMetrics records an aggregated metric.
+	ObserveMetrics(metrics metricdata.Metrics)
 }
 
 // Registration is an token representing the unique registration of a callback
