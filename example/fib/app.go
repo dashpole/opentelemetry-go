@@ -41,11 +41,27 @@ func NewApp(r io.Reader, l *log.Logger) *App {
 	return &App{r: r, l: l}
 }
 
+func newWrappedTracer(name string) *wrappedTracer {
+	return &wrappedTracer{Tracer: otel.Tracer(name)}
+}
+
+type wrappedTracer struct {
+	trace.Tracer
+}
+
+var _ trace.Tracer = &wrappedTracer{}
+
+func (wp *wrappedTracer) Start(ctx context.Context, spanName string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
+	spanCtx, span := wp.Tracer.Start(ctx, spanName, opts...)
+	// log the span ID or anything else
+	return spanCtx, span
+}
+
 // Run starts polling users for Fibonacci number requests and writes results.
 func (a *App) Run(ctx context.Context) error {
 	for {
 		// Each execution of the run loop, we should get a new "root" span and context.
-		newCtx, span := otel.Tracer(name).Start(ctx, "Run")
+		newCtx, span := newWrappedTracer(name).Start(ctx, "Run")
 
 		n, err := a.Poll(newCtx)
 		if err != nil {
@@ -60,7 +76,7 @@ func (a *App) Run(ctx context.Context) error {
 
 // Poll asks a user for input and returns the request.
 func (a *App) Poll(ctx context.Context) (uint, error) {
-	_, span := otel.Tracer(name).Start(ctx, "Poll")
+	_, span := newWrappedTracer(name).Start(ctx, "Poll")
 	defer span.End()
 
 	a.l.Print("What Fibonacci number would you like to know: ")
@@ -83,11 +99,11 @@ func (a *App) Poll(ctx context.Context) (uint, error) {
 // Write writes the n-th Fibonacci number back to the user.
 func (a *App) Write(ctx context.Context, n uint) {
 	var span trace.Span
-	ctx, span = otel.Tracer(name).Start(ctx, "Write")
+	ctx, span = newWrappedTracer(name).Start(ctx, "Write")
 	defer span.End()
 
 	f, err := func(ctx context.Context) (uint64, error) {
-		_, span := otel.Tracer(name).Start(ctx, "Fibonacci")
+		_, span := newWrappedTracer(name).Start(ctx, "Fibonacci")
 		defer span.End()
 		f, err := Fibonacci(n)
 		if err != nil {
