@@ -6,6 +6,7 @@ package aggregate // import "go.opentelemetry.io/otel/sdk/metric/internal/aggreg
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -13,42 +14,60 @@ import (
 )
 
 type sumValue[N int64 | float64] struct {
-	n     N
+	n     atomicSum[N]
 	res   FilteredExemplarReservoir[N]
 	attrs attribute.Set
 }
 
+func (s *sumValue[N]) measure(ctx context.Context, value N, droppedAttr []attribute.KeyValue) {
+	s.res.Offer(ctx, value, droppedAttr)
+	s.n.add(value)
+}
+
 // valueMap is the storage for sums.
 type valueMap[N int64 | float64] struct {
-	sync.Mutex
-	newRes func(attribute.Set) FilteredExemplarReservoir[N]
-	limit  limiter[sumValue[N]]
-	values map[attribute.Distinct]sumValue[N]
+	newRes   func(attribute.Set) FilteredExemplarReservoir[N]
+	aggLimit int
+
+	hot    atomic.Bool
+	values [2]sync.Map
+	len    [2]atomic.Int64
 }
 
 func newValueMap[N int64 | float64](limit int, r func(attribute.Set) FilteredExemplarReservoir[N]) *valueMap[N] {
 	return &valueMap[N]{
-		newRes: r,
-		limit:  newLimiter[sumValue[N]](limit),
-		values: make(map[attribute.Distinct]sumValue[N]),
+		newRes:   r,
+		aggLimit: limit,
 	}
 }
 
-func (s *valueMap[N]) measure(ctx context.Context, value N, fltrAttr attribute.Set, droppedAttr []attribute.KeyValue) {
-	s.Lock()
-	defer s.Unlock()
-
-	attr := s.limit.Attributes(fltrAttr, s.values)
-	v, ok := s.values[attr.Equivalent()]
-	if !ok {
-		v.res = s.newRes(attr)
+func (s *valueMap[N]) hotIdx() int {
+	if s.hot.Load() {
+		return 1
 	}
+	return 0
+}
 
-	v.attrs = attr
-	v.n += value
-	v.res.Offer(ctx, value, droppedAttr)
-
-	s.values[attr.Equivalent()] = v
+func (s *valueMap[N]) measure(ctx context.Context, value N, fltrAttr attribute.Set, droppedAttr []attribute.KeyValue) {
+	attr := fltrAttr
+	hotIdx := s.hotIdx()
+	v, ok := s.values[hotIdx].Load(attr.Equivalent())
+	if !ok {
+		if s.aggLimit > 0 {
+			if s.len[hotIdx].Load() >= int64(s.aggLimit-1) {
+				attr = overflowSet
+			}
+		}
+		var loaded bool
+		v, loaded = s.values[hotIdx].LoadOrStore(attr.Equivalent(), &sumValue[N]{
+			res:   s.newRes(attr),
+			attrs: attr,
+		})
+		if !loaded {
+			s.len[hotIdx].Add(1)
+		}
+	}
+	v.(*sumValue[N]).measure(ctx, value, droppedAttr)
 }
 
 // newSum returns an aggregator that summarizes a set of measurements as their
@@ -81,30 +100,30 @@ func (s *sum[N]) delta(
 	sData.Temporality = metricdata.DeltaTemporality
 	sData.IsMonotonic = s.monotonic
 
-	s.Lock()
-	defer s.Unlock()
-
-	n := len(s.values)
+	n := int(s.len[s.hotIdx()].Load())
 	dPts := reset(sData.DataPoints, n, n)
 
 	var i int
-	for _, val := range s.values {
+	s.values[s.hotIdx()].Range(func(key, value any) bool {
+		val := value.(*sumValue[N])
 		dPts[i].Attributes = val.attrs
 		dPts[i].StartTime = s.start
 		dPts[i].Time = t
-		dPts[i].Value = val.n
+		dPts[i].Value = val.n.load()
 		collectExemplars(&dPts[i].Exemplars, val.res.Collect)
 		i++
-	}
+		return true
+	})
+	// TODO
 	// Do not report stale values.
-	clear(s.values)
+	// clear(s.values)
 	// The delta collection cycle resets.
 	s.start = t
 
 	sData.DataPoints = dPts
 	*dest = sData
 
-	return n
+	return int(n)
 }
 
 func (s *sum[N]) cumulative(
@@ -118,25 +137,20 @@ func (s *sum[N]) cumulative(
 	sData.Temporality = metricdata.CumulativeTemporality
 	sData.IsMonotonic = s.monotonic
 
-	s.Lock()
-	defer s.Unlock()
-
-	n := len(s.values)
+	n := int(s.len[s.hotIdx()].Load())
 	dPts := reset(sData.DataPoints, n, n)
 
 	var i int
-	for _, value := range s.values {
-		dPts[i].Attributes = value.attrs
+	s.values[s.hotIdx()].Range(func(key, value any) bool {
+		val := value.(*sumValue[N])
+		dPts[i].Attributes = val.attrs
 		dPts[i].StartTime = s.start
 		dPts[i].Time = t
-		dPts[i].Value = value.n
-		collectExemplars(&dPts[i].Exemplars, value.res.Collect)
-		// TODO (#3006): This will use an unbounded amount of memory if there
-		// are unbounded number of attribute sets being aggregated. Attribute
-		// sets that become "stale" need to be forgotten so this will not
-		// overload the system.
+		dPts[i].Value = val.n.load()
+		collectExemplars(&dPts[i].Exemplars, val.res.Collect)
 		i++
-	}
+		return true
+	})
 
 	sData.DataPoints = dPts
 	*dest = sData
@@ -181,27 +195,22 @@ func (s *precomputedSum[N]) delta(
 	sData.Temporality = metricdata.DeltaTemporality
 	sData.IsMonotonic = s.monotonic
 
-	s.Lock()
-	defer s.Unlock()
-
-	n := len(s.values)
+	n := int(s.len[s.hotIdx()].Load())
 	dPts := reset(sData.DataPoints, n, n)
 
 	var i int
-	for key, value := range s.values {
-		delta := value.n - s.reported[key]
-
-		dPts[i].Attributes = value.attrs
+	s.values[s.hotIdx()].Range(func(key, value any) bool {
+		val := value.(*sumValue[N])
+		dPts[i].Attributes = val.attrs
 		dPts[i].StartTime = s.start
 		dPts[i].Time = t
-		dPts[i].Value = delta
-		collectExemplars(&dPts[i].Exemplars, value.res.Collect)
-
-		newReported[key] = value.n
+		dPts[i].Value = val.n.load()
+		collectExemplars(&dPts[i].Exemplars, val.res.Collect)
 		i++
-	}
+		return true
+	})
 	// Unused attribute sets do not report.
-	clear(s.values)
+	// clear(s.values)
 	s.reported = newReported
 	// The delta collection cycle resets.
 	s.start = t
@@ -223,24 +232,20 @@ func (s *precomputedSum[N]) cumulative(
 	sData.Temporality = metricdata.CumulativeTemporality
 	sData.IsMonotonic = s.monotonic
 
-	s.Lock()
-	defer s.Unlock()
-
-	n := len(s.values)
+	n := int(s.len[s.hotIdx()].Load())
 	dPts := reset(sData.DataPoints, n, n)
 
 	var i int
-	for _, val := range s.values {
+	s.values[s.hotIdx()].Range(func(key, value any) bool {
+		val := value.(*sumValue[N])
 		dPts[i].Attributes = val.attrs
 		dPts[i].StartTime = s.start
 		dPts[i].Time = t
-		dPts[i].Value = val.n
+		dPts[i].Value = val.n.load()
 		collectExemplars(&dPts[i].Exemplars, val.res.Collect)
-
 		i++
-	}
-	// Unused attribute sets do not report.
-	clear(s.values)
+		return true
+	})
 
 	sData.DataPoints = dPts
 	*dest = sData
