@@ -29,9 +29,8 @@ type valueMap[N int64 | float64] struct {
 	newRes   func(attribute.Set) FilteredExemplarReservoir[N]
 	aggLimit int
 
-	hot    atomic.Bool
-	values [2]sync.Map
-	len    [2]atomic.Int64
+	values sync.Map
+	len    atomic.Int64
 }
 
 func newValueMap[N int64 | float64](limit int, r func(attribute.Set) FilteredExemplarReservoir[N]) *valueMap[N] {
@@ -41,30 +40,22 @@ func newValueMap[N int64 | float64](limit int, r func(attribute.Set) FilteredExe
 	}
 }
 
-func (s *valueMap[N]) hotIdx() int {
-	if s.hot.Load() {
-		return 1
-	}
-	return 0
-}
-
 func (s *valueMap[N]) measure(ctx context.Context, value N, fltrAttr attribute.Set, droppedAttr []attribute.KeyValue) {
 	attr := fltrAttr
-	hotIdx := s.hotIdx()
-	v, ok := s.values[hotIdx].Load(attr.Equivalent())
+	v, ok := s.values.Load(attr.Equivalent())
 	if !ok {
 		if s.aggLimit > 0 {
-			if s.len[hotIdx].Load() >= int64(s.aggLimit-1) {
+			if s.len.Load() >= int64(s.aggLimit-1) {
 				attr = overflowSet
 			}
 		}
 		var loaded bool
-		v, loaded = s.values[hotIdx].LoadOrStore(attr.Equivalent(), &sumValue[N]{
+		v, loaded = s.values.LoadOrStore(attr.Equivalent(), &sumValue[N]{
 			res:   s.newRes(attr),
 			attrs: attr,
 		})
 		if !loaded {
-			s.len[hotIdx].Add(1)
+			s.len.Add(1)
 		}
 	}
 	v.(*sumValue[N]).measure(ctx, value, droppedAttr)
@@ -100,30 +91,33 @@ func (s *sum[N]) delta(
 	sData.Temporality = metricdata.DeltaTemporality
 	sData.IsMonotonic = s.monotonic
 
-	n := int(s.len[s.hotIdx()].Load())
-	dPts := reset(sData.DataPoints, n, n)
+	dPts := reset(sData.DataPoints, 0, int(s.len.Load()))
 
 	var i int
-	s.values[s.hotIdx()].Range(func(key, value any) bool {
+	s.values.Range(func(key, _ any) bool {
+		s.len.Add(-1)
+		// Delete the key once it is read to ensure we don't report stale
+		// values.
+		value, _ := s.values.LoadAndDelete(key)
 		val := value.(*sumValue[N])
-		dPts[i].Attributes = val.attrs
-		dPts[i].StartTime = s.start
-		dPts[i].Time = t
-		dPts[i].Value = val.n.load()
-		collectExemplars(&dPts[i].Exemplars, val.res.Collect)
+		newPt := metricdata.DataPoint[N]{
+			Attributes: val.attrs,
+			StartTime:  s.start,
+			Time:       t,
+			Value:      val.n.load(),
+		}
+		collectExemplars(&newPt.Exemplars, val.res.Collect)
+		dPts = append(dPts, newPt)
 		i++
 		return true
 	})
-	// TODO
-	// Do not report stale values.
-	// clear(s.values)
 	// The delta collection cycle resets.
 	s.start = t
 
 	sData.DataPoints = dPts
 	*dest = sData
 
-	return int(n)
+	return int(i)
 }
 
 func (s *sum[N]) cumulative(
@@ -137,17 +131,19 @@ func (s *sum[N]) cumulative(
 	sData.Temporality = metricdata.CumulativeTemporality
 	sData.IsMonotonic = s.monotonic
 
-	n := int(s.len[s.hotIdx()].Load())
-	dPts := reset(sData.DataPoints, n, n)
+	dPts := reset(sData.DataPoints, 0, int(s.len.Load()))
 
 	var i int
-	s.values[s.hotIdx()].Range(func(key, value any) bool {
+	s.values.Range(func(key, value any) bool {
 		val := value.(*sumValue[N])
-		dPts[i].Attributes = val.attrs
-		dPts[i].StartTime = s.start
-		dPts[i].Time = t
-		dPts[i].Value = val.n.load()
-		collectExemplars(&dPts[i].Exemplars, val.res.Collect)
+		newPt := metricdata.DataPoint[N]{
+			Attributes: val.attrs,
+			StartTime:  s.start,
+			Time:       t,
+			Value:      val.n.load(),
+		}
+		collectExemplars(&newPt.Exemplars, val.res.Collect)
+		dPts = append(dPts, newPt)
 		i++
 		return true
 	})
@@ -155,7 +151,7 @@ func (s *sum[N]) cumulative(
 	sData.DataPoints = dPts
 	*dest = sData
 
-	return n
+	return i
 }
 
 // newPrecomputedSum returns an aggregator that summarizes a set of
@@ -195,22 +191,26 @@ func (s *precomputedSum[N]) delta(
 	sData.Temporality = metricdata.DeltaTemporality
 	sData.IsMonotonic = s.monotonic
 
-	n := int(s.len[s.hotIdx()].Load())
-	dPts := reset(sData.DataPoints, n, n)
+	dPts := reset(sData.DataPoints, 0, int(s.len.Load()))
 
 	var i int
-	s.values[s.hotIdx()].Range(func(key, value any) bool {
+	s.values.Range(func(key, _ any) bool {
+		s.len.Add(-1)
+		// Delete the key once it is read to ensure we don't report stale
+		// values.
+		value, _ := s.values.LoadAndDelete(key)
 		val := value.(*sumValue[N])
-		dPts[i].Attributes = val.attrs
-		dPts[i].StartTime = s.start
-		dPts[i].Time = t
-		dPts[i].Value = val.n.load()
-		collectExemplars(&dPts[i].Exemplars, val.res.Collect)
+		newPt := metricdata.DataPoint[N]{
+			Attributes: val.attrs,
+			StartTime:  s.start,
+			Time:       t,
+			Value:      val.n.load(),
+		}
+		collectExemplars(&newPt.Exemplars, val.res.Collect)
+		dPts = append(dPts, newPt)
 		i++
 		return true
 	})
-	// Unused attribute sets do not report.
-	// clear(s.values)
 	s.reported = newReported
 	// The delta collection cycle resets.
 	s.start = t
@@ -218,7 +218,7 @@ func (s *precomputedSum[N]) delta(
 	sData.DataPoints = dPts
 	*dest = sData
 
-	return n
+	return i
 }
 
 func (s *precomputedSum[N]) cumulative(
@@ -232,17 +232,19 @@ func (s *precomputedSum[N]) cumulative(
 	sData.Temporality = metricdata.CumulativeTemporality
 	sData.IsMonotonic = s.monotonic
 
-	n := int(s.len[s.hotIdx()].Load())
-	dPts := reset(sData.DataPoints, n, n)
+	dPts := reset(sData.DataPoints, 0, int(s.len.Load()))
 
 	var i int
-	s.values[s.hotIdx()].Range(func(key, value any) bool {
+	s.values.Range(func(key, value any) bool {
 		val := value.(*sumValue[N])
-		dPts[i].Attributes = val.attrs
-		dPts[i].StartTime = s.start
-		dPts[i].Time = t
-		dPts[i].Value = val.n.load()
-		collectExemplars(&dPts[i].Exemplars, val.res.Collect)
+		newPt := metricdata.DataPoint[N]{
+			Attributes: val.attrs,
+			StartTime:  s.start,
+			Time:       t,
+			Value:      val.n.load(),
+		}
+		collectExemplars(&newPt.Exemplars, val.res.Collect)
+		dPts = append(dPts, newPt)
 		i++
 		return true
 	})
@@ -250,5 +252,5 @@ func (s *precomputedSum[N]) cumulative(
 	sData.DataPoints = dPts
 	*dest = sData
 
-	return n
+	return i
 }
