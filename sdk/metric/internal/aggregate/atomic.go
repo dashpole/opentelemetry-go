@@ -5,6 +5,7 @@ package aggregate // import "go.opentelemetry.io/otel/sdk/metric/internal/aggreg
 
 import (
 	"math"
+	"runtime"
 	"sync/atomic"
 )
 
@@ -45,6 +46,69 @@ func (n *atomicSum[N]) add(value N) {
 			return
 		}
 	}
+}
+
+// locklessDataPoint allows writers to update datapoints without any locking,
+// while allowing readers to get a consistent snapshot where only completed
+// measure() calls are included. It prioritizes fast and lockless writes over
+// read performance since measurements are usually in the application's hot
+// path.
+//
+// This is accomplished by keeping a "hot" and a "cold" data point, where
+// measurements are made on the "hot" data point and data is read from the cold
+// one. Prior to reading, the reader atomically switches the hot bit, resets
+// the started count, and then waits for the ended count to be equal to the
+// started count before reading.
+type locklessDataPoint[N int64 | float64] struct {
+	// startedWritesAndHotIdx contains a 63-bit counter in the lower bits,
+	// and a 1 bit hot index to denote which of the two data-points new
+	// measurements to write to. These are contained together so that read()
+	// can atomically swap the hot bit, reset the started writes to zero, and
+	// read the number writes that were started prior to the hot bit being
+	// swapped.
+	startedWritesAndHotIdx atomic.Uint64
+	// endedMeasures is the number of writes that have completed to each
+	// dataPoint.
+	endedWrites [2]atomic.Uint64
+	dataPoint   [2]*atomicSum[N]
+}
+
+// startWrite returns the data point that should be written to, and the hot
+// index. The caller must call endWrite on the hot index after it finishes its
+// write operation. startWrite is safe to call concurrently with other methods.
+func (l *locklessDataPoint[N]) startWrite() (*atomicSum[N], int) {
+	// We increment h.startedMeasuresAndHotIdx so that the counter in the lower
+	// 63 bits gets incremented. At the same time, we get the new value
+	// back, which we can use to find the currently-hot index.
+	hotIdx := l.startedWritesAndHotIdx.Add(1) >> 63
+	return l.dataPoint[hotIdx], int(hotIdx)
+}
+
+// endWrite signals to the reader that a write has fully completed.
+// endWrite is safe to call concurrently.
+func (l *locklessDataPoint[N]) endWrite(hotIdx int) {
+	l.endedWrites[hotIdx].Add(1)
+}
+
+// read swaps the hot bit, waits for all writes to complete, and then returns
+// the now-cold data point. It is the caller's responsibility to reset the
+// data-point back to its zero value, and to ensure read is not called
+// concurrently.
+func (l *locklessDataPoint[N]) read() *atomicSum[N] {
+	n := l.startedWritesAndHotIdx.Load()
+	coldIdx := (^n) >> 63
+	// Swap the hot and cold index while resetting the started measurements
+	// count to zero.
+	n = l.startedWritesAndHotIdx.Swap((coldIdx << 63) + 1)
+	hotIdx := n >> 63
+	startedCount := n & ((1 << 63) - 1)
+	// Wait for all measurements to the previously-hot map to finish.
+	for startedCount != l.endedWrites[hotIdx].Load() {
+		runtime.Gosched() // Let measurements complete.
+	}
+	// reset the number of ended measures
+	l.endedWrites[hotIdx].Store(0)
+	return l.dataPoint[hotIdx]
 }
 
 // // limitedSyncMap
