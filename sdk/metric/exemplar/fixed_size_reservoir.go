@@ -125,6 +125,8 @@ func (r *FixedSizeReservoir) Offer(ctx context.Context, t time.Time, n Value, a 
 	// https://github.com/MrAlias/reservoir-sampling for a performance
 	// comparison of reservoir sampling algorithms.
 
+	r.storage.mu.Lock()
+	defer r.storage.mu.Unlock()
 	if int(r.count) < cap(r.measurements) {
 		r.store(int(r.count), newMeasurement(ctx, t, n, a))
 	} else if r.count == r.next {
