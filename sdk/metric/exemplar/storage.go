@@ -5,7 +5,7 @@ package exemplar // import "go.opentelemetry.io/otel/sdk/metric/exemplar"
 
 import (
 	"context"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -14,31 +14,29 @@ import (
 
 // storage is an exemplar storage for [Reservoir] implementations.
 type storage struct {
-	mu sync.Mutex
 	// measurements are the measurements sampled.
 	//
 	// This does not use []metricdata.Exemplar because it potentially would
 	// require an allocation for trace and span IDs in the hot path of Offer.
-	measurements []measurement
+	measurements []atomic.Value
 }
 
 func newStorage(n int) *storage {
-	return &storage{measurements: make([]measurement, n)}
+	return &storage{measurements: make([]atomic.Value, n)}
 }
 
 func (r *storage) store(idx int, m measurement) {
-	r.measurements[idx] = m
+	r.measurements[idx].Store(m)
 }
 
 // Collect returns all the held exemplars.
 //
 // The Reservoir state is preserved after this call.
 func (r *storage) Collect(dest *[]Exemplar) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	*dest = reset(*dest, len(r.measurements), len(r.measurements))
 	var n int
-	for _, m := range r.measurements {
+	for _, meas := range r.measurements {
+		m := meas.Load().(measurement)
 		if !m.valid {
 			continue
 		}

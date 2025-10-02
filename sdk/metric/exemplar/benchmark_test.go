@@ -22,9 +22,7 @@ func BenchmarkFixedSizeReservoirOffer(b *testing.B) {
 			// reservoirs records exemplars very infrequently after a large
 			// number of collect calls.
 			if i%100 == 99 {
-				reservoir.storage.mu.Lock()
 				reservoir.reset()
-				reservoir.storage.mu.Unlock()
 			}
 			i++
 		}
