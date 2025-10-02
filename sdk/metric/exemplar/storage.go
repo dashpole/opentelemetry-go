@@ -28,7 +28,9 @@ func newStorage(n int) *storage {
 
 func (r *storage) store(idx int, m *measurement) {
 	old := r.measurements[idx].Swap(m)
-	mPool.Put(old)
+	if old != nil {
+		mPool.Put(old)
+	}
 }
 
 // Collect returns all the held exemplars.

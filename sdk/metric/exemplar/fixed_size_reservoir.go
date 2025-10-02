@@ -7,7 +7,6 @@ import (
 	"context"
 	"math"
 	"math/rand/v2"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -40,15 +39,36 @@ type FixedSizeReservoir struct {
 	reservoir.ConcurrentSafe
 	*storage
 
-	mu sync.Mutex
+	count           atomic.Uint64
+	nextCalculators []*nextCalculator
+}
 
+type nextCalculator struct {
 	// count is the number of measurement seen, and is in the lower 32 bits.
 	// next is the next count that will store a measurement at a random index
 	// once the reservoir has been filled, and is in the upper 32 bits.
-	countAndNext atomic.Int64
+	countAndNext atomic.Uint64
 	// w is the largest random number in a distribution that is used to compute
 	// the next next.
-	w float64
+	w atomic.Uint64
+
+	len int
+}
+
+// returns the count before the increment and next value.
+func (f *nextCalculator) incrementCount() (uint64, uint64) {
+	n := f.countAndNext.Add(1)
+	return n&((1<<32)-1) - 1, n >> 32
+}
+
+// returns the count before the increment and next value.
+func (f *nextCalculator) incrementNext(inc uint64) {
+	f.countAndNext.Add(inc << 32)
+}
+
+// returns the count before the increment and next value.
+func (f *nextCalculator) setCountAndNext(count uint64, next uint64) {
+	f.countAndNext.Store(count<<32 + next)
 }
 
 func newFixedSizeReservoir(s *storage) *FixedSizeReservoir {
@@ -73,22 +93,6 @@ func (*FixedSizeReservoir) randomFloat64() float64 {
 		f = rand.Float64()
 	}
 	return f
-}
-
-// returns the count before the increment and next value.
-func (f *FixedSizeReservoir) incrementCount() (int64, int64) {
-	n := f.countAndNext.Add(1)
-	return n&((1<<32)-1) - 1, n >> 32
-}
-
-// returns the count before the increment and next value.
-func (f *FixedSizeReservoir) incrementNext(inc int64) {
-	f.countAndNext.Add(inc << 32)
-}
-
-// returns the count before the increment and next value.
-func (f *FixedSizeReservoir) setCountAndNext(count int64, next int64) {
-	f.countAndNext.Store(count<<32 + next)
 }
 
 // Offer accepts the parameters associated with a measurement. The
@@ -144,26 +148,22 @@ func (r *FixedSizeReservoir) Offer(ctx context.Context, t time.Time, n Value, a 
 	// https://github.com/MrAlias/reservoir-sampling for a performance
 	// comparison of reservoir sampling algorithms.
 
-	count, next := r.incrementCount()
+	count, next := r.incrementCount() // 22 NS
 	if int(count) < cap(r.measurements) {
 		r.store(int(count), newMeasurement(ctx, t, n, a))
 	} else if count >= next {
 		// Overwrite a random existing measurement with the one offered.
 		idx := int(rand.Int64N(int64(cap(r.measurements))))
 		r.store(idx, newMeasurement(ctx, t, n, a))
-		r.mu.Lock()
-		defer r.mu.Unlock()
 		r.advance()
 	}
 }
 
 // reset resets r to the initial state.
-func (r *FixedSizeReservoir) reset() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (r *nextCalculator) reset() {
 	// Random index inserts should only happen after the storage is full.
 	// This resets the number of exemplars known.
-	r.setCountAndNext(0, int64(cap(r.measurements)))
+	r.setCountAndNext(0, 1)
 
 	// Initial random number in the series used to generate r.next.
 	//
@@ -174,14 +174,14 @@ func (r *FixedSizeReservoir) reset() {
 	// This maps the uniform random number in (0,1) to a geometric distribution
 	// over the same interval. The mean of the distribution is inversely
 	// proportional to the storage capacity.
-	r.w = math.Exp(math.Log(r.randomFloat64()) / float64(cap(r.measurements)))
+	r.w.Store(math.Float64bits(math.Exp(math.Log(r.randomFloat64()) / float64(cap(r.measurements)))))
 
 	r.advance()
 }
 
 // advance updates the count at which the offered measurement will overwrite an
 // existing exemplar.
-func (r *FixedSizeReservoir) advance() {
+func (r *nextCalculator) advance() {
 	// Calculate the next value in the random number series.
 	//
 	// The current value of r.w is based on the max of a distribution of random
@@ -194,7 +194,14 @@ func (r *FixedSizeReservoir) advance() {
 	// therefore the next r.w will be based on the same distribution (i.e.
 	// `max(u_1,u_2,...,u_k)`). Therefore, we can sample the next r.w by
 	// computing the next random number `u` and take r.w as `w * u^(1/k)`.
-	r.w *= math.Exp(math.Log(r.randomFloat64()) / float64(cap(r.measurements)))
+	var newW float64
+	for {
+		prevW := r.w.Load()
+		newW = math.Float64frombits(prevW) * math.Exp(math.Log(r.randomFloat64())/float64(cap(r.measurements)))
+		if r.w.CompareAndSwap(prevW, math.Float64bits(newW)) {
+			break
+		}
+	}
 	// Use the new random number in the series to calculate the count of the
 	// next measurement that will be stored.
 	//
@@ -205,7 +212,7 @@ func (r *FixedSizeReservoir) advance() {
 	//
 	// Important to note, the new r.next will always be at least 1 more than
 	// the last r.next.
-	r.incrementNext(int64(math.Log(r.randomFloat64())/math.Log(1-r.w)) + 1)
+	r.incrementNext(uint64(math.Log(r.randomFloat64())/math.Log(1-newW)) + 1)
 }
 
 // Collect returns all the held exemplars.
