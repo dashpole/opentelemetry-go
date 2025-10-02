@@ -31,12 +31,18 @@ func BenchmarkFixedSizeReservoirOffer(b *testing.B) {
 
 func BenchmarkHistogramReservoirOffer(b *testing.B) {
 	ts := time.Now()
-	val := NewValue[int64](25)
 	ctx := b.Context()
-	res := NewHistogramReservoir([]float64{0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000})
+	buckets := []float64{0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000}
+	values := make([]Value, len(buckets))
+	for i, bucket := range buckets {
+		values[i] = NewValue[float64](bucket + 1)
+	}
+	res := NewHistogramReservoir(buckets)
 	b.RunParallel(func(pb *testing.PB) {
+		i := 0
 		for pb.Next() {
-			res.Offer(ctx, ts, val, nil)
+			res.Offer(ctx, ts, values[i%len(values)], nil)
+			i++
 		}
 	})
 }
