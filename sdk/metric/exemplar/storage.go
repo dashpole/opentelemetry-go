@@ -69,7 +69,7 @@ type measurement struct {
 	Time time.Time
 	// Value is the value of the measurement.
 	Value Value
-	// SpanContext is the SpanContext active when a measurement was made.
+	// Ctx is the active context when a measurement was made.
 	Ctx context.Context
 
 	valid bool
