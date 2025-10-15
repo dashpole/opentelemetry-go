@@ -5,6 +5,7 @@ package exemplar // import "go.opentelemetry.io/otel/sdk/metric/exemplar"
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -24,8 +25,14 @@ func newStorage(n int) *storage {
 	return &storage{measurements: make([]measurement, n)}
 }
 
-func (r *storage) store(idx int, m measurement) {
-	r.measurements[idx] = m
+func (r *storage) store(ctx context.Context, idx int, ts time.Time, v Value, droppedAttr []attribute.KeyValue) {
+	r.measurements[idx].mux.Lock()
+	defer r.measurements[idx].mux.Unlock()
+	r.measurements[idx].FilteredAttributes = droppedAttr
+	r.measurements[idx].Time = ts
+	r.measurements[idx].Value = v
+	r.measurements[idx].Ctx = ctx
+	r.measurements[idx].valid = true
 }
 
 // Collect returns all the held exemplars.
@@ -34,12 +41,15 @@ func (r *storage) store(idx int, m measurement) {
 func (r *storage) Collect(dest *[]Exemplar) {
 	*dest = reset(*dest, len(r.measurements), len(r.measurements))
 	var n int
-	for _, m := range r.measurements {
-		if !m.valid {
+	for i := range r.measurements {
+		r.measurements[i].mux.Lock()
+		if !r.measurements[i].valid {
+			r.measurements[i].mux.Unlock()
 			continue
 		}
 
-		m.exemplar(&(*dest)[n])
+		r.measurements[i].exemplar(&(*dest)[n])
+		r.measurements[i].mux.Unlock()
 		n++
 	}
 	*dest = (*dest)[:n]
@@ -47,44 +57,35 @@ func (r *storage) Collect(dest *[]Exemplar) {
 
 // measurement is a measurement made by a telemetry system.
 type measurement struct {
+	mux sync.Mutex
 	// FilteredAttributes are the attributes dropped during the measurement.
 	FilteredAttributes []attribute.KeyValue
 	// Time is the time when the measurement was made.
 	Time time.Time
 	// Value is the value of the measurement.
 	Value Value
-	// SpanContext is the SpanContext active when a measurement was made.
-	SpanContext trace.SpanContext
+	// Ctx is the context active when a measurement was made.
+	Ctx context.Context
 
 	valid bool
 }
 
-// newMeasurement returns a new non-empty Measurement.
-func newMeasurement(ctx context.Context, ts time.Time, v Value, droppedAttr []attribute.KeyValue) measurement {
-	return measurement{
-		FilteredAttributes: droppedAttr,
-		Time:               ts,
-		Value:              v,
-		SpanContext:        trace.SpanContextFromContext(ctx),
-		valid:              true,
-	}
-}
-
 // exemplar returns m as an [Exemplar].
-func (m measurement) exemplar(dest *Exemplar) {
+func (m *measurement) exemplar(dest *Exemplar) {
 	dest.FilteredAttributes = m.FilteredAttributes
 	dest.Time = m.Time
 	dest.Value = m.Value
 
-	if m.SpanContext.HasTraceID() {
-		traceID := m.SpanContext.TraceID()
+	sc := trace.SpanContextFromContext(m.Ctx)
+	if sc.HasTraceID() {
+		traceID := sc.TraceID()
 		dest.TraceID = traceID[:]
 	} else {
 		dest.TraceID = dest.TraceID[:0]
 	}
 
-	if m.SpanContext.HasSpanID() {
-		spanID := m.SpanContext.SpanID()
+	if sc.HasSpanID() {
+		spanID := sc.SpanID()
 		dest.SpanID = spanID[:]
 	} else {
 		dest.SpanID = dest.SpanID[:0]
