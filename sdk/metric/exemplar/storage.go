@@ -19,7 +19,7 @@ type storage struct {
 	//
 	// This does not use []metricdata.Exemplar because it potentially would
 	// require an allocation for trace and span IDs in the hot path of Offer.
-	measurements []atomic.Value
+	measurements []atomic.Pointer[measurement]
 }
 
 func newStorage(n int) *storage {
