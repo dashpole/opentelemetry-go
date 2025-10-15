@@ -58,3 +58,14 @@ func TestNewFixedSizeReservoirSamplingCorrectness(t *testing.T) {
 	// ensuring no bias in our random sampling algorithm.
 	assert.InDelta(t, 1/mean, intensity, 0.02) // Within 5σ.
 }
+
+func TestFixedSizeReservoirConcurrentSafe(t *testing.T) {
+	t.Run("Int64", reservoirConcurrentSafeTest[int64](func(n int) (ReservoirProvider, int) {
+		return FixedSizeReservoirProvider(n), n
+	}))
+
+	t.Run("Float64", reservoirConcurrentSafeTest[float64](func(n int) (ReservoirProvider, int) {
+		return FixedSizeReservoirProvider(n), n
+	}))
+
+}
