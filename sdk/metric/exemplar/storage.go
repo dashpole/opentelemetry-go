@@ -23,7 +23,7 @@ type storage struct {
 }
 
 func newStorage(n int) *storage {
-	return &storage{measurements: make([]atomic.Value, n)}
+	return &storage{measurements: make([]atomic.Pointer[measurement], n)}
 }
 
 func (r *storage) store(idx int, m *measurement) {
@@ -39,18 +39,17 @@ func (r *storage) store(idx int, m *measurement) {
 func (r *storage) Collect(dest *[]Exemplar) {
 	*dest = reset(*dest, len(r.measurements), len(r.measurements))
 	var n int
-	for _, val := range r.measurements {
+	for i := range r.measurements {
 		// For performance reasons, this iterates over measurements
 		// concurrently with new measurements being written. This means we do
 		// not get a point-in-time snapshot of the state of the reservoir.
 		// This means that for sequential Offer calls, a later Offer call may
 		// be collected and an earlier call not collected if they are written
 		// to different indices.
-		loaded := val.Load()
-		if loaded == nil {
+		m := r.measurements[i].Load()
+		if m == nil {
 			continue
 		}
-		m := loaded.(*measurement)
 		if !m.valid {
 			continue
 		}
