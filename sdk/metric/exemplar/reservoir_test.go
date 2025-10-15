@@ -167,13 +167,11 @@ func reservoirConcurrentSafeTest[N int64 | float64](f factory) func(*testing.T) 
 			}()
 		}
 		for range 2 {
-			wg.Add(1)
 			var dest []Exemplar
 			r.Collect(&dest)
 			for _, e := range dest {
 				validateExemplar[N](t, e)
 			}
-			wg.Done()
 		}
 		wg.Wait()
 	}
@@ -202,8 +200,10 @@ func validateExemplar[N int64 | float64](t *testing.T, e Exemplar) {
 	}
 	ctx, ts, _, attrs := generateOfferInputs[N](t, i)
 	sc := trace.SpanContextFromContext(ctx)
-	assert.Equal(t, sc.TraceID(), e.TraceID)
-	assert.Equal(t, sc.SpanID(), e.SpanID)
+	tID := sc.TraceID()
+	sID := sc.SpanID()
+	assert.Equal(t, tID[:], e.TraceID)
+	assert.Equal(t, sID[:], e.SpanID)
 	assert.Equal(t, ts, e.Time)
 	assert.Equal(t, attrs, e.FilteredAttributes)
 }

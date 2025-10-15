@@ -50,11 +50,15 @@ func (r *storage) Collect(dest *[]Exemplar) {
 		if m == nil {
 			continue
 		}
-		if !m.valid {
-			continue
+		m.mux.Lock()
+		for m.Idx != i {
+			m.mux.Unlock()
+			m = r.measurements[i].Load()
+			m.mux.Lock()
 		}
 
 		m.exemplar(&(*dest)[n])
+		m.mux.Unlock()
 		n++
 	}
 	*dest = (*dest)[:n]
@@ -62,6 +66,7 @@ func (r *storage) Collect(dest *[]Exemplar) {
 
 // measurement is a measurement made by a telemetry system.
 type measurement struct {
+	mux sync.Mutex
 	// FilteredAttributes are the attributes dropped during the measurement.
 	FilteredAttributes []attribute.KeyValue
 	// Time is the time when the measurement was made.
@@ -71,7 +76,7 @@ type measurement struct {
 	// Ctx is the active context when a measurement was made.
 	Ctx context.Context
 
-	valid bool
+	Idx int
 }
 
 var mPool = sync.Pool{
@@ -81,18 +86,20 @@ var mPool = sync.Pool{
 }
 
 // newMeasurement returns a new non-empty Measurement.
-func newMeasurement(ctx context.Context, ts time.Time, v Value, droppedAttr []attribute.KeyValue) *measurement {
+func newMeasurement(ctx context.Context, idx int, ts time.Time, v Value, droppedAttr []attribute.KeyValue) *measurement {
 	m := mPool.Get().(*measurement)
+	m.mux.Lock()
+	defer m.mux.Unlock()
 	m.FilteredAttributes = droppedAttr
 	m.Time = ts
 	m.Value = v
 	m.Ctx = ctx
-	m.valid = true
+	m.Idx = idx
 	return m
 }
 
 // exemplar returns m as an [Exemplar].
-func (m measurement) exemplar(dest *Exemplar) {
+func (m *measurement) exemplar(dest *Exemplar) {
 	dest.FilteredAttributes = m.FilteredAttributes
 	dest.Time = m.Time
 	dest.Value = m.Value
