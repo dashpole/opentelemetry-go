@@ -57,30 +57,108 @@ func newHotColdExpoHistogramDataPoint[N int64 | float64](
 
 // record adds a new measurement to the histogram. It will rescale the buckets if needed.
 func (p *hotColdExpoHistogramPoint[N]) record(v N) {
-	hotIdx := p.hcwg.start()
-	defer p.hcwg.done(hotIdx)
-	p.rescaleMux.Lock()
-	defer p.rescaleMux.Unlock()
-	if !p.noMinMax {
-		p.hotColdPoint[hotIdx].minMax.Update(v)
-	}
-	if !p.noSum {
-		p.hotColdPoint[hotIdx].sum.add(v)
-	}
-
 	absV := math.Abs(float64(v))
 
+	hotIdx := p.hcwg.start()
 	if float64(absV) == 0.0 {
 		p.hotColdPoint[hotIdx].zeroCount.Add(1)
+		p.hcwg.done(hotIdx)
 		return
 	}
 
-	bucket := &p.hotColdPoint[hotIdx].posBuckets
+	hotBucket := &p.hotColdPoint[hotIdx].posBuckets
 	if v < 0 {
-		bucket = &p.hotColdPoint[hotIdx].negBuckets
+		hotBucket = &p.hotColdPoint[hotIdx].negBuckets
 	}
 
-	bucket.record(absV)
+	if hotBucket.recordBucket(hotBucket.getBin(absV)) {
+		if !p.noMinMax {
+			p.hotColdPoint[hotIdx].minMax.Update(v)
+		}
+		if !p.noSum {
+			p.hotColdPoint[hotIdx].sum.add(v)
+		}
+		p.hcwg.done(hotIdx)
+		fmt.Printf("FAST PATH for %v \n", v)
+		return
+	}
+	fmt.Printf("START SLOW PATH for %v\n", v)
+
+	// Mark our write as done before locking to prevent deadlock.
+	// We prevent a partial write by ensuring that no updates have been made yet.
+	p.hcwg.done(hotIdx)
+	p.rescaleMux.Lock()
+	defer p.rescaleMux.Unlock()
+
+	// Hot may have been swapped while we were waiting for the lock.
+	// We don't use p.hcwg.start() because we already hold the lock, and would
+	// deadlock when waiting for writes to complete.
+	hotIdx = p.hcwg.loadHot()
+
+	hotBucket = &p.hotColdPoint[hotIdx].posBuckets
+	if v < 0 {
+		hotBucket = &p.hotColdPoint[hotIdx].negBuckets
+	}
+
+	// Try recording again in-case it was resized while we were waiting, and to
+	// ensure the bucket range doesn't change.
+	bin := hotBucket.getBin(absV)
+	if hotBucket.recordBucket(bin) {
+		if !p.noMinMax {
+			p.hotColdPoint[hotIdx].minMax.Update(v)
+		}
+		if !p.noSum {
+			p.hotColdPoint[hotIdx].sum.add(v)
+		}
+		fmt.Printf("Resized while we waited for lock PATH for %v\n", v)
+		return
+	}
+
+	// Rescale the cold to the new scale and min/max
+	coldIdx := (hotIdx + 1) % 2
+	coldBucket := &p.hotColdPoint[coldIdx].posBuckets
+	if v < 0 {
+		coldBucket = &p.hotColdPoint[coldIdx].negBuckets
+	}
+
+	// Since recordBucket failed above, we know we need a scale change.
+	scaleDelta := hotBucket.scaleChange(bin)
+	if hotBucket.scale-scaleDelta < expoMinScale {
+		// With a scale of -10 there is only two buckets for the whole range of float64 values.
+		// This can only happen if there is a max size of 1.
+		otel.Handle(errors.New("exponential histogram scale underflow"))
+		return
+	}
+	// Rescale the cold to the new scale and min/max
+	coldBucket.scale = hotBucket.scale
+	startBin, endBin := hotBucket.startAndEnd.Load()
+	coldBucket.startAndEnd.Store(startBin, endBin)
+	fmt.Printf("DOWNSCALE COLD\n")
+	coldBucket.downscale(scaleDelta)
+	bin = coldBucket.getBin(absV)
+	fmt.Printf("BIN %v\n", bin)
+	coldBucket.resizeToInclude(bin)
+
+	p.hcwg.swapHotAndWait()
+	// Now that hot is swapped to cold, downscale it, and merge it into the new hot buckets.
+	fmt.Printf("DOWNSCALE HOT\n")
+	hotBucket.downscale(scaleDelta)
+	fmt.Printf("MERGE HOT -> COLD\n")
+	hotBucket.mergeInto(coldBucket)
+	hotBucket.reset(p.maxScale)
+
+	if !coldBucket.recordBucket(bin) {
+		// This shouldn't be possible, since we just resized it to include bin.
+		otel.Handle(errors.New("failed to record bucket after resize"))
+		return
+	}
+	if !p.noMinMax {
+		p.hotColdPoint[coldIdx].minMax.Update(v)
+	}
+	if !p.noSum {
+		p.hotColdPoint[coldIdx].sum.add(v)
+	}
+	fmt.Printf("DONE SLOW val %v, counts %+v\n", v, coldBucket.counts)
 }
 
 // expoHistogramPointCounters contains only the atomic counter data, and is
@@ -97,12 +175,14 @@ type expoHistogramPointCounters[N int64 | float64] struct {
 func newExpoHistogramPointCounters[N int64 | float64](maxSize int, maxScale int32) expoHistogramPointCounters[N] {
 	return expoHistogramPointCounters[N]{
 		posBuckets: expoBuckets{
-			scale:  maxScale,
-			counts: make([]atomic.Uint64, maxSize),
+			scale:       maxScale,
+			counts:      make([]atomic.Uint64, maxSize),
+			startAndEnd: atomicLimitedRange{maxSize: int32(maxSize)},
 		},
 		negBuckets: expoBuckets{
-			scale:  maxScale,
-			counts: make([]atomic.Uint64, maxSize),
+			scale:       maxScale,
+			counts:      make([]atomic.Uint64, maxSize),
+			startAndEnd: atomicLimitedRange{maxSize: int32(maxSize)},
 		},
 	}
 }
@@ -255,37 +335,13 @@ func (b *expoBuckets) scaleChange(bin int32) int32 {
 	return count
 }
 
-// record increments the count for the given bin, and expands the buckets if needed.
-// Size changes must be done before calling this function.
-func (b *expoBuckets) record(absV float64) {
-	bin := b.getBin(absV)
-	fmt.Printf("record() Bin %v for val %v, with scale %v\n", bin, absV, b.scale)
-
-	// If the new bin would make the counts larger than maxScale, we need to
-	// downscale current measurements.
-	if scaleDelta := b.scaleChange(bin); scaleDelta > 0 {
-		if b.scale-scaleDelta < expoMinScale {
-			// With a scale of -10 there is only two buckets for the whole range of float64 values.
-			// This can only happen if there is a max size of 1.
-			otel.Handle(errors.New("exponential histogram scale underflow"))
-			return
-		}
-		// Downscale
-		b.downscale(scaleDelta)
-
-		bin = b.getBin(absV)
-		fmt.Printf("record() After downscale Bin %v for val %v\n", bin, absV)
-	} else {
-		fmt.Printf("scale change was 0\n")
+// recordBucket returns true if the bucket was incremented, or false if a downscale is required to
+func (b *expoBuckets) recordBucket(bin int32) bool {
+	if b.startAndEnd.Add(bin) {
+		b.counts[b.getIdx(bin)].Add(1)
+		return true
 	}
-	b.recordBucket(bin)
-}
-
-func (b *expoBuckets) recordBucket(bin int32) {
-	b.resizeToInclude(bin)
-	b.counts[b.getIdx(bin)].Add(1)
-	startBin, endBin := b.startAndEnd.Load()
-	fmt.Printf("incremented bin %v idx %v, startBin %v, endBin %v, counts %+v\n", bin, b.getIdx(bin), startBin, endBin, b.counts)
+	return false
 }
 
 func (b *expoBuckets) validate() {
@@ -344,7 +400,10 @@ func (b *expoBuckets) downscale(delta int32) {
 			continue
 		}
 		b.counts[newIdx].Add(b.counts[b.getIdx(i)].Load())
-		fmt.Printf("downscale ADD i %v i/steps %v idx %v, getIdx %v counts %+v\n", i, i/steps, i/steps+int32(startShift), b.getIdx(i/steps+int32(startShift)), b.counts)
+		fmt.Printf("downscale ADD startBin %v, endBin %v, i %v i/steps %v idx %v, getIdx %v counts %+v\n", startBin, endBin, i, i/steps, i/steps+int32(startShift), b.getIdx(i/steps+int32(startShift)), b.counts)
+		if startBin == -524288 {
+			panic("FOO")
+		}
 	}
 	fmt.Printf("downscale END Merge downsize %v startBin %v, endBin %v, counts %v\n", delta, startBin, endBin, b.counts)
 
@@ -396,6 +455,9 @@ func (b *expoBuckets) mergeInto(into *expoBuckets) {
 	} else if scaleDelta < 0 {
 		b.downscale(-scaleDelta)
 	}
+	if into.scale != b.scale {
+		panic("scale not equal when merging")
+	}
 
 	startBin, endBin := b.startAndEnd.Load()
 	into.resizeToInclude(startBin)
@@ -416,6 +478,7 @@ func (b *expoBuckets) mergeInto(into *expoBuckets) {
 	for i := range b.counts {
 		into.counts[i+int(startBinDelta)].Add(b.counts[i].Load())
 	}
+	fmt.Printf("MERGE into counts after merge %+v\n", into.counts)
 	b.validate()
 }
 
