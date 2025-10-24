@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -166,7 +167,7 @@ func testExpoHistogramDataPointRecord[N int64 | float64](t *testing.T) {
 			restore := withHandler(t)
 			defer restore()
 
-			dp := newExpoHistogramDataPoint[N](alice, tt.maxSize, 20, false, false)
+			dp := newExpoHistogramDataPoint[N](alice, tt.maxSize, 20)
 			for _, v := range tt.values {
 				dp.record(v, false, false)
 				dp.record(-v, false, false)
@@ -350,7 +351,7 @@ func testExpoHistogramDataPointRecordFloat64(t *testing.T) {
 			restore := withHandler(t)
 			defer restore()
 
-			dp := newExpoHistogramDataPoint[float64](alice, tt.maxSize, 20, false, false)
+			dp := newExpoHistogramDataPoint[float64](alice, tt.maxSize, 20)
 			for _, v := range tt.values {
 				dp.record(v, false, false)
 				dp.record(-v, false, false)
@@ -367,7 +368,7 @@ func TestExponentialHistogramDataPointRecordLimits(t *testing.T) {
 	// These bins are calculated from the following formula:
 	// floor( log2( value) * 2^20 ) using an arbitrary precision calculator.
 
-	fdp := newExpoHistogramDataPoint[float64](alice, 4, 20, false, false)
+	fdp := newExpoHistogramDataPoint[float64](alice, 4, 20)
 	fdp.record(math.MaxFloat64, false, false)
 
 	readIdx := fdp.posBuckets.hcwg.loadHot()
@@ -376,7 +377,7 @@ func TestExponentialHistogramDataPointRecordLimits(t *testing.T) {
 		t.Errorf("Expected startBin to be 1073741823, got %d", startBin)
 	}
 
-	fdp = newExpoHistogramDataPoint[float64](alice, 4, 20, false, false)
+	fdp = newExpoHistogramDataPoint[float64](alice, 4, 20)
 	fdp.record(math.SmallestNonzeroFloat64, false, false)
 
 	readIdx = fdp.posBuckets.hcwg.loadHot()
@@ -385,7 +386,7 @@ func TestExponentialHistogramDataPointRecordLimits(t *testing.T) {
 		t.Errorf("Expected startBin to be -1126170625, got %d", startBin)
 	}
 
-	idp := newExpoHistogramDataPoint[int64](alice, 4, 20, false, false)
+	idp := newExpoHistogramDataPoint[int64](alice, 4, 20)
 	idp.record(math.MaxInt64, false, false)
 
 	readIdx = idp.posBuckets.hcwg.loadHot()
@@ -643,7 +644,7 @@ func TestScaleChange(t *testing.T) {
 
 func BenchmarkPrepend(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		agg := newExpoHistogramDataPoint[float64](alice, 1024, 20, false, false)
+		agg := newExpoHistogramDataPoint[float64](alice, 1024, 20)
 		n := math.MaxFloat64
 		for range 1024 {
 			agg.record(n, false, false)
@@ -654,7 +655,7 @@ func BenchmarkPrepend(b *testing.B) {
 
 func BenchmarkAppend(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		agg := newExpoHistogramDataPoint[float64](alice, 1024, 20, false, false)
+		agg := newExpoHistogramDataPoint[float64](alice, 1024, 20)
 		n := smallestNonZeroNormalFloat64
 		for range 1024 {
 			agg.record(n, false, false)
@@ -695,7 +696,7 @@ func BenchmarkExponentialHistogram(b *testing.B) {
 
 func TestSubNormal(t *testing.T) {
 
-	ehdp := newExpoHistogramDataPoint[float64](alice, 4, 20, false, false)
+	ehdp := newExpoHistogramDataPoint[float64](alice, 4, 20)
 	ehdp.record(math.SmallestNonzeroFloat64, false, false)
 	ehdp.record(math.SmallestNonzeroFloat64, false, false)
 	ehdp.record(math.SmallestNonzeroFloat64, false, false)
@@ -1026,12 +1027,12 @@ func testCumulativeExpoHist[N int64 | float64]() func(t *testing.T) {
 	})
 }
 
-// func TestExponentialHistogramAggregationConcurrentSafe(t *testing.T) {
-// 	t.Run("Int64/Delta", testDeltaExpoHistConcurrentSafe[int64]())
-// 	t.Run("Float64/Delta", testDeltaExpoHistConcurrentSafe[float64]())
-// 	t.Run("Int64/Cumulative", testCumulativeExpoHistConcurrentSafe[int64]())
-// 	t.Run("Float64/Cumulative", testCumulativeExpoHistConcurrentSafe[float64]())
-// }
+func TestExponentialHistogramAggregationConcurrentSafe(t *testing.T) {
+	t.Run("Int64/Delta", testDeltaExpoHistConcurrentSafe[int64]())
+	t.Run("Float64/Delta", testDeltaExpoHistConcurrentSafe[float64]())
+	t.Run("Int64/Cumulative", testCumulativeExpoHistConcurrentSafe[int64]())
+	t.Run("Float64/Cumulative", testCumulativeExpoHistConcurrentSafe[float64]())
+}
 
 func testDeltaExpoHistConcurrentSafe[N int64 | float64]() func(t *testing.T) {
 	in, out := Builder[N]{
@@ -1150,4 +1151,29 @@ func lowerBound(index, scale int32) float64 {
 	// For example lowerBound(getBin(Math.SmallestNonzeroFloat64, 7), 7) == 0.0
 	// 2 ^ (index * 2 ^ (-scale))
 	return math.Exp2(math.Ldexp(float64(index), -int(scale)))
+}
+
+func TestExpoHistogramPointCountersConcurrentSafe(t *testing.T) {
+	c1 := newExpoHistogramPointCounters[float64](20, 20)
+	c2 := newExpoHistogramPointCounters[float64](20, 20)
+	for i := range 10 {
+		c1.record(float64(i), false, false)
+	}
+	var wg2 sync.WaitGroup
+	for i := range 100 {
+		wg2.Add(1)
+		go func() {
+			c2.record(float64(i), false, false)
+			wg2.Done()
+		}()
+	}
+	c1.posBuckets.rescaleMux.Lock()
+	c1.negBuckets.rescaleMux.Lock()
+	got := metricdata.ExponentialHistogramDataPoint[float64]{}
+	c1.loadInto(&got, false, false)
+	c1.mergeInto(&c2, false, false)
+	c1.reset(20)
+	c1.posBuckets.rescaleMux.Unlock()
+	c1.negBuckets.rescaleMux.Unlock()
+	wg2.Wait()
 }
