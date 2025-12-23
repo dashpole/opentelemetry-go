@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"sync"
 
 	"go.opentelemetry.io/otel/attribute/internal/xxhash"
 )
@@ -201,6 +202,98 @@ func (l *Set) Encoded(encoder Encoder) string {
 	return encoder.Encode(l.Iter())
 }
 
+var (
+	len1SetPool = sync.Pool{
+		New: func() any {
+			// Return a pointer to avoid extra allocation on Put().
+			return &Set{data: [1]KeyValue{}}
+		},
+	}
+	len2SetPool = sync.Pool{
+		New: func() any {
+			// Return a pointer to avoid extra allocation on Put().
+			return &Set{data: [2]KeyValue{}}
+		},
+	}
+	len3SetPool = sync.Pool{
+		New: func() any {
+			// Return a pointer to avoid extra allocation on Put().
+			return &Set{data: [3]KeyValue{}}
+		},
+	}
+	len4SetPool = sync.Pool{
+		New: func() any {
+			// Return a pointer to avoid extra allocation on Put().
+			return &Set{data: [4]KeyValue{}}
+		},
+	}
+	len5SetPool = sync.Pool{
+		New: func() any {
+			// Return a pointer to avoid extra allocation on Put().
+			return &Set{data: [5]KeyValue{}}
+		},
+	}
+	len6SetPool = sync.Pool{
+		New: func() any {
+			// Return a pointer to avoid extra allocation on Put().
+			return &Set{data: [6]KeyValue{}}
+		},
+	}
+	len7SetPool = sync.Pool{
+		New: func() any {
+			// Return a pointer to avoid extra allocation on Put().
+			return &Set{data: [7]KeyValue{}}
+		},
+	}
+	len8SetPool = sync.Pool{
+		New: func() any {
+			// Return a pointer to avoid extra allocation on Put().
+			return &Set{data: [8]KeyValue{}}
+		},
+	}
+	len9SetPool = sync.Pool{
+		New: func() any {
+			// Return a pointer to avoid extra allocation on Put().
+			return &Set{data: [9]KeyValue{}}
+		},
+	}
+	len10SetPool = sync.Pool{
+		New: func() any {
+			// Return a pointer to avoid extra allocation on Put().
+			return &Set{data: [10]KeyValue{}}
+		},
+	}
+)
+
+// Free releases the underlying set storage, and helps avoid allocations on
+// future NewSet calls. The Set MUST NOT be used after Free is called.
+//
+// It is NOT safe to call concurrently.
+func (l *Set) Free() {
+	switch l.data.(type) {
+	case [1]KeyValue:
+		len1SetPool.Put(l)
+	case [2]KeyValue:
+		len2SetPool.Put(l)
+	case [3]KeyValue:
+		len3SetPool.Put(l)
+	case [4]KeyValue:
+		len4SetPool.Put(l)
+	case [5]KeyValue:
+		len5SetPool.Put(l)
+	case [6]KeyValue:
+		len6SetPool.Put(l)
+	case [7]KeyValue:
+		len7SetPool.Put(l)
+	case [8]KeyValue:
+		len8SetPool.Put(l)
+	case [9]KeyValue:
+		len9SetPool.Put(l)
+	case [10]KeyValue:
+		len10SetPool.Put(l)
+	}
+}
+
 // NewSet returns a new Set. See the documentation for
 // NewSetWithSortableFiltered for more details.
 //
@@ -357,43 +450,48 @@ func (l *Set) Filter(re Filter) (Set, []KeyValue) {
 
 // newSet returns a new set based on the sorted and uniqued kvs.
 func newSet(kvs []KeyValue) Set {
-	s := Set{
-		hash: hashKVs(kvs),
-		data: computeDataFixed(kvs),
-	}
+	s := computeDataFixed(kvs)
+	s.hash = hashKVs(kvs)
 	if s.data == nil {
 		s.data = computeDataReflect(kvs)
 	}
-	return s
+	return *s
 }
 
 // computeDataFixed computes a Set data for small slices. It returns nil if the
 // input is too large for this code path.
-func computeDataFixed(kvs []KeyValue) any {
+func computeDataFixed(kvs []KeyValue) *Set {
+	var set *Set
 	switch len(kvs) {
 	case 1:
-		return [1]KeyValue(kvs)
+		set = len1SetPool.Get().(*Set)
 	case 2:
-		return [2]KeyValue(kvs)
+		set = len2SetPool.Get().(*Set)
 	case 3:
-		return [3]KeyValue(kvs)
+		set = len3SetPool.Get().(*Set)
 	case 4:
-		return [4]KeyValue(kvs)
+		set = len4SetPool.Get().(*Set)
 	case 5:
-		return [5]KeyValue(kvs)
+		set = len5SetPool.Get().(*Set)
 	case 6:
-		return [6]KeyValue(kvs)
+		set = len6SetPool.Get().(*Set)
 	case 7:
-		return [7]KeyValue(kvs)
+		set = len7SetPool.Get().(*Set)
 	case 8:
-		return [8]KeyValue(kvs)
+		set = len8SetPool.Get().(*Set)
 	case 9:
-		return [9]KeyValue(kvs)
+		set = len9SetPool.Get().(*Set)
 	case 10:
-		return [10]KeyValue(kvs)
+		set = len10SetPool.Get().(*Set)
 	default:
 		return nil
 	}
+	reflectSet := set.reflectValue()
+	for i := range len(kvs) {
+		reflectSet.Index(i).Interface().(KeyValue).Key = kvs[i].Key
+		reflectSet.Index(i).Interface().(KeyValue).Value = kvs[i].Value
+	}
+	return set
 }
 
 // computeDataReflect computes a Set data using reflection, works for any size
