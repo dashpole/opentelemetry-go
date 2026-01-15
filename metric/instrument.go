@@ -221,12 +221,12 @@ type AddOption interface {
 
 // AddConfig contains options for an addition measurement.
 type AddConfig struct {
-	attrs attribute.Set
+	attrs []attribute.KeyValue
 }
 
 // NewAddConfig returns a new [AddConfig] with all opts applied.
 func NewAddConfig(opts []AddOption) AddConfig {
-	config := AddConfig{attrs: *attribute.EmptySet()}
+	config := AddConfig{}
 	for _, o := range opts {
 		config = o.applyAdd(config)
 	}
@@ -234,7 +234,7 @@ func NewAddConfig(opts []AddOption) AddConfig {
 }
 
 // Attributes returns the configured attribute set.
-func (c AddConfig) Attributes() attribute.Set {
+func (c AddConfig) Attributes() []attribute.KeyValue {
 	return c.attrs
 }
 
@@ -246,12 +246,12 @@ type RecordOption interface {
 
 // RecordConfig contains options for a recorded measurement.
 type RecordConfig struct {
-	attrs attribute.Set
+	attrs []attribute.KeyValue
 }
 
 // NewRecordConfig returns a new [RecordConfig] with all opts applied.
 func NewRecordConfig(opts []RecordOption) RecordConfig {
-	config := RecordConfig{attrs: *attribute.EmptySet()}
+	config := RecordConfig{}
 	for _, o := range opts {
 		config = o.applyRecord(config)
 	}
@@ -259,7 +259,7 @@ func NewRecordConfig(opts []RecordOption) RecordConfig {
 }
 
 // Attributes returns the configured attribute set.
-func (c RecordConfig) Attributes() attribute.Set {
+func (c RecordConfig) Attributes() []attribute.KeyValue {
 	return c.attrs
 }
 
@@ -271,12 +271,12 @@ type ObserveOption interface {
 
 // ObserveConfig contains options for an observed measurement.
 type ObserveConfig struct {
-	attrs attribute.Set
+	attrs []attribute.KeyValue
 }
 
 // NewObserveConfig returns a new [ObserveConfig] with all opts applied.
 func NewObserveConfig(opts []ObserveOption) ObserveConfig {
-	config := ObserveConfig{attrs: *attribute.EmptySet()}
+	config := ObserveConfig{}
 	for _, o := range opts {
 		config = o.applyObserve(config)
 	}
@@ -284,7 +284,7 @@ func NewObserveConfig(opts []ObserveOption) ObserveConfig {
 }
 
 // Attributes returns the configured attribute set.
-func (c ObserveConfig) Attributes() attribute.Set {
+func (c ObserveConfig) Attributes() []attribute.KeyValue {
 	return c.attrs
 }
 
@@ -295,51 +295,51 @@ type MeasurementOption interface {
 	ObserveOption
 }
 
-type attrOpt struct {
+type attrSetOpt struct {
 	set attribute.Set
 }
 
 // mergeSets returns the union of keys between a and b. Any duplicate keys will
 // use the value associated with b.
-func mergeSets(a, b attribute.Set) attribute.Set {
+func mergeSets(a, b attribute.Set) []attribute.KeyValue {
 	// NewMergeIterator uses the first value for any duplicates.
 	iter := attribute.NewMergeIterator(&b, &a)
 	merged := make([]attribute.KeyValue, 0, a.Len()+b.Len())
 	for iter.Next() {
 		merged = append(merged, iter.Attribute())
 	}
-	return attribute.NewSet(merged...)
+	return merged
 }
 
-func (o attrOpt) applyAdd(c AddConfig) AddConfig {
+func (o attrSetOpt) applyAdd(c AddConfig) AddConfig {
 	switch {
 	case o.set.Len() == 0:
-	case c.attrs.Len() == 0:
-		c.attrs = o.set
+	case len(c.attrs) == 0:
+		c.attrs = o.set.ToSlice()
 	default:
-		c.attrs = mergeSets(c.attrs, o.set)
+		c.attrs = append(c.attrs, o.set.ToSlice()...)
 	}
 	return c
 }
 
-func (o attrOpt) applyRecord(c RecordConfig) RecordConfig {
+func (o attrSetOpt) applyRecord(c RecordConfig) RecordConfig {
 	switch {
 	case o.set.Len() == 0:
-	case c.attrs.Len() == 0:
-		c.attrs = o.set
+	case len(c.attrs) == 0:
+		c.attrs = o.set.ToSlice()
 	default:
-		c.attrs = mergeSets(c.attrs, o.set)
+		c.attrs = append(c.attrs, o.set.ToSlice()...)
 	}
 	return c
 }
 
-func (o attrOpt) applyObserve(c ObserveConfig) ObserveConfig {
+func (o attrSetOpt) applyObserve(c ObserveConfig) ObserveConfig {
 	switch {
 	case o.set.Len() == 0:
-	case c.attrs.Len() == 0:
-		c.attrs = o.set
+	case len(c.attrs) == 0:
+		c.attrs = o.set.ToSlice()
 	default:
-		c.attrs = mergeSets(c.attrs, o.set)
+		c.attrs = append(c.attrs, o.set.ToSlice()...)
 	}
 	return c
 }
@@ -351,7 +351,44 @@ func (o attrOpt) applyObserve(c ObserveConfig) ObserveConfig {
 // attributes will be merged together in the order they are passed. Attributes
 // with duplicate keys will use the last value passed.
 func WithAttributeSet(attributes attribute.Set) MeasurementOption {
-	return attrOpt{set: attributes}
+	return attrSetOpt{set: attributes}
+}
+
+type attrOpt struct {
+	attrs []attribute.KeyValue
+}
+
+func (o attrOpt) applyAdd(c AddConfig) AddConfig {
+	switch {
+	case len(o.attrs) == 0:
+	case len(c.attrs) == 0:
+		c.attrs = o.attrs
+	default:
+		c.attrs = append(c.attrs, o.attrs...)
+	}
+	return c
+}
+
+func (o attrOpt) applyRecord(c RecordConfig) RecordConfig {
+	switch {
+	case len(o.attrs) == 0:
+	case len(c.attrs) == 0:
+		c.attrs = o.attrs
+	default:
+		c.attrs = append(c.attrs, o.attrs...)
+	}
+	return c
+}
+
+func (o attrOpt) applyObserve(c ObserveConfig) ObserveConfig {
+	switch {
+	case len(o.attrs) == 0:
+	case len(c.attrs) == 0:
+		c.attrs = o.attrs
+	default:
+		c.attrs = append(c.attrs, o.attrs...)
+	}
+	return c
 }
 
 // WithAttributes converts attributes into an attribute Set and sets the Set to
@@ -369,8 +406,6 @@ func WithAttributeSet(attributes attribute.Set) MeasurementOption {
 //
 // See [WithAttributeSet] for information about how multiple WithAttributes are
 // merged.
-func WithAttributes(attributes ...attribute.KeyValue) MeasurementOption {
-	cp := make([]attribute.KeyValue, len(attributes))
-	copy(cp, attributes)
-	return attrOpt{set: attribute.NewSet(cp...)}
+func WithAttributes(attrs ...attribute.KeyValue) MeasurementOption {
+	return attrOpt{attrs: attrs}
 }
