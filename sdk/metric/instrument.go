@@ -211,7 +211,7 @@ func (i *int64Inst) Enabled(context.Context) bool {
 func (i *int64Inst) aggregate(
 	ctx context.Context,
 	val int64,
-	s attribute.Set,
+	s []attribute.KeyValue,
 ) { // nolint:revive  // okay to shadow pkg with method.
 	for _, in := range i.measures {
 		in(ctx, val, s)
@@ -249,7 +249,7 @@ func (i *float64Inst) Enabled(context.Context) bool {
 	return len(i.measures) != 0
 }
 
-func (i *float64Inst) aggregate(ctx context.Context, val float64, s attribute.Set) {
+func (i *float64Inst) aggregate(ctx context.Context, val float64, s []attribute.KeyValue) {
 	for _, in := range i.measures {
 		in(ctx, val, s)
 	}
@@ -329,7 +329,7 @@ func newObservable[N int64 | float64](m *meter, kind InstrumentKind, name, desc,
 }
 
 // observe records the val for the set of attrs.
-func (o *observable[N]) observe(val N, s attribute.Set) {
+func (o *observable[N]) observe(val N, s []attribute.KeyValue) {
 	o.measures.observe(val, s)
 }
 
@@ -340,7 +340,7 @@ func (o *observable[N]) appendMeasures(meas []aggregate.Measure[N]) {
 type measures[N int64 | float64] []aggregate.Measure[N]
 
 // observe records the val for the set of attrs.
-func (m measures[N]) observe(val N, s attribute.Set) {
+func (m measures[N]) observe(val N, s []attribute.KeyValue) {
 	for _, in := range m {
 		in(context.Background(), val, s)
 	}

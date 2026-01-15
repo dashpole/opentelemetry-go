@@ -12,12 +12,12 @@ import (
 )
 
 func BenchmarkInstrument(b *testing.B) {
-	attr := func(id int) attribute.Set {
-		return attribute.NewSet(
+	attr := func(id int) []attribute.KeyValue {
+		return []attribute.KeyValue{
 			attribute.String("user", "Alice"),
 			attribute.Bool("admin", true),
 			attribute.Int("id", id),
-		)
+		}
 	}
 
 	b.Run("instrumentImpl/aggregate", func(b *testing.B) {

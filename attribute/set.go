@@ -205,6 +205,9 @@ func (l *Set) Encoded(encoder Encoder) string {
 // check whether KeyValues already exist in a map before calling the more
 // expensive NewSet.
 func NewDistinct(kvs ...KeyValue) Distinct {
+	if kvs == nil {
+		return Distinct{hash: emptySet.hash}
+	}
 	// Stable sort so the following de-duplication can implement
 	// last-value-wins semantics.
 	slices.SortStableFunc(kvs, func(a, b KeyValue) int {

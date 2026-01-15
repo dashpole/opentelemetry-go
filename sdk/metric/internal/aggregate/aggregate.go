@@ -16,7 +16,7 @@ import (
 var now = time.Now
 
 // Measure receives measurements to be aggregated.
-type Measure[N int64 | float64] func(context.Context, N, attribute.Set)
+type Measure[N int64 | float64] func(context.Context, N, []attribute.KeyValue)
 
 // ComputeAggregation stores the aggregate of measurements into dest and
 // returns the number of aggregate data-points output.
@@ -57,18 +57,20 @@ func (b Builder[N]) resFunc() func(attribute.Set) FilteredExemplarReservoir[N] {
 	return dropReservoir
 }
 
-type fltrMeasure[N int64 | float64] func(ctx context.Context, value N, fltrAttr attribute.Set, droppedAttr []attribute.KeyValue)
+type fltrMeasure[N int64 | float64] func(ctx context.Context, value N, fltrAttrs []attribute.KeyValue, droppedAttr []attribute.KeyValue)
 
 func (b Builder[N]) filter(f fltrMeasure[N]) Measure[N] {
 	if b.Filter != nil {
 		fltr := b.Filter // Copy to make it immutable after assignment.
-		return func(ctx context.Context, n N, a attribute.Set) {
-			fAttr, dropped := a.Filter(fltr)
-			f(ctx, n, fAttr, dropped)
+		return func(ctx context.Context, n N, attrs []attribute.KeyValue) {
+			// TODO: we can make this more performant by filtering without
+			// creating the new set.
+			fAttr, dropped := attribute.NewSetWithFiltered(attrs, fltr)
+			f(ctx, n, fAttr.ToSlice(), dropped)
 		}
 	}
-	return func(ctx context.Context, n N, a attribute.Set) {
-		f(ctx, n, a, nil)
+	return func(ctx context.Context, n N, attrs []attribute.KeyValue) {
+		f(ctx, n, attrs, nil)
 	}
 }
 
