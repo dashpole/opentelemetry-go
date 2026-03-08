@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -1179,15 +1180,15 @@ func testExpoHistConcurrentSafeEdgeCases[N int64 | float64](temporality metricda
 				AggregationLimit: 3,
 			}.ExponentialBucketHistogram(160, 20, false, false)
 
-			ctx := context.Background()
+			ctx := t.Context()
 			var wg sync.WaitGroup
 			const numGoroutines = 10
 			const numRecords = 100
 			wg.Add(numGoroutines)
-			for i := 0; i < numGoroutines; i++ {
+			for range numGoroutines {
 				go func() {
 					defer wg.Done()
-					for j := 0; j < numRecords; j++ {
+					for range numRecords {
 						meas(ctx, 0, alice)
 					}
 				}()
@@ -1209,7 +1210,7 @@ func testExpoHistConcurrentSafeEdgeCases[N int64 | float64](temporality metricda
 				AggregationLimit: 3,
 			}.ExponentialBucketHistogram(160, 20, false, false)
 
-			ctx := context.Background()
+			ctx := t.Context()
 			var wg sync.WaitGroup
 			const numGoroutines = 10
 			const numRecords = 100
@@ -1223,10 +1224,10 @@ func testExpoHistConcurrentSafeEdgeCases[N int64 | float64](temporality metricda
 			var m sync.Mutex
 
 			wg.Add(numGoroutines)
-			for i := 0; i < numGoroutines; i++ {
+			for i := range numGoroutines {
 				go func(id int) {
 					defer wg.Done()
-					for j := 0; j < numRecords; j++ {
+					for j := range numRecords {
 						// generate a mix of very large and very small powers of 2
 						valFloat := math.Exp2((float64(j) / float64(numRecords)) * 60.0)
 						if id%2 == 0 {
