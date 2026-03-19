@@ -183,6 +183,11 @@ type hotColdWaitGroup struct {
 	endedCounts [2]atomic.Uint64
 }
 
+// hotIdx returns the currently hot index without modifying it or waiting.
+func (l *hotColdWaitGroup) hotIdx() uint64 {
+	return l.startedCountAndHotIdx.Load() >> 63
+}
+
 // start returns the hot index that the writer should write to. The returned
 // hot index is 0 or 1. The caller must call done(hot index) after it finishes
 // its operation. start() is safe to call concurrently with other methods.

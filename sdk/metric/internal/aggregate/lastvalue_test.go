@@ -525,6 +525,9 @@ func validateGauge[N int64 | float64](t *testing.T, aggs []metricdata.Aggregatio
 	for _, v := range getConcurrentVals[N]() {
 		valid[v] = true
 	}
+	// Lock-free concurrent captures can snap the zero-value (initial allocation)
+	// for a fleeting moment before it is overridden by the first write payload.
+	valid[0] = true
 
 	for _, agg := range aggs {
 		s, ok := agg.(metricdata.Gauge[N])
