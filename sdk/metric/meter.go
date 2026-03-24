@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/internal/global"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/embedded"
@@ -15,9 +16,11 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/internal/aggregate"
 )
 
-// ErrInstrumentName indicates the created instrument has an invalid name.
-// Valid names must consist of 255 or fewer characters including alphanumeric, _, ., -, / and start with a letter.
 var ErrInstrumentName = errors.New("invalid instrument name")
+
+type defaultAttributesGetter interface {
+	DefaultAttributes() []attribute.Key
+}
 
 // meter handles the creation and coordination of all metric instruments. A
 // meter represents a single instrumentation scope; all metric telemetry
@@ -70,7 +73,15 @@ func (m *meter) Int64Counter(name string, options ...metric.Int64CounterOption) 
 	cfg := metric.NewInt64CounterConfig(options...)
 	const kind = InstrumentKindCounter
 	p := int64InstProvider{m}
-	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit())
+	
+	var allowedKeys []attribute.Key
+	for _, o := range options {
+		if g, ok := o.(defaultAttributesGetter); ok {
+			allowedKeys = append(allowedKeys, g.DefaultAttributes()...)
+		}
+	}
+
+	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), allowedKeys)
 	if err != nil {
 		return i, err
 	}
@@ -88,7 +99,15 @@ func (m *meter) Int64UpDownCounter(
 	cfg := metric.NewInt64UpDownCounterConfig(options...)
 	const kind = InstrumentKindUpDownCounter
 	p := int64InstProvider{m}
-	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit())
+
+	var allowedKeys []attribute.Key
+	for _, o := range options {
+		if g, ok := o.(defaultAttributesGetter); ok {
+			allowedKeys = append(allowedKeys, g.DefaultAttributes()...)
+		}
+	}
+
+	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), allowedKeys)
 	if err != nil {
 		return i, err
 	}
@@ -102,7 +121,15 @@ func (m *meter) Int64UpDownCounter(
 func (m *meter) Int64Histogram(name string, options ...metric.Int64HistogramOption) (metric.Int64Histogram, error) {
 	cfg := metric.NewInt64HistogramConfig(options...)
 	p := int64InstProvider{m}
-	i, err := p.lookupHistogram(name, cfg)
+
+	var allowedKeys []attribute.Key
+	for _, o := range options {
+		if g, ok := o.(defaultAttributesGetter); ok {
+			allowedKeys = append(allowedKeys, g.DefaultAttributes()...)
+		}
+	}
+
+	i, err := p.lookupHistogram(name, cfg, allowedKeys)
 	if err != nil {
 		return i, err
 	}
@@ -117,7 +144,15 @@ func (m *meter) Int64Gauge(name string, options ...metric.Int64GaugeOption) (met
 	cfg := metric.NewInt64GaugeConfig(options...)
 	const kind = InstrumentKindGauge
 	p := int64InstProvider{m}
-	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit())
+
+	var allowedKeys []attribute.Key
+	for _, o := range options {
+		if g, ok := o.(defaultAttributesGetter); ok {
+			allowedKeys = append(allowedKeys, g.DefaultAttributes()...)
+		}
+	}
+
+	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), allowedKeys)
 	if err != nil {
 		return i, err
 	}
@@ -181,11 +216,20 @@ func (m *meter) Int64ObservableCounter(
 	options ...metric.Int64ObservableCounterOption,
 ) (metric.Int64ObservableCounter, error) {
 	cfg := metric.NewInt64ObservableCounterConfig(options...)
+	
+	var allowedKeys []attribute.Key
+	for _, o := range options {
+		if g, ok := o.(defaultAttributesGetter); ok {
+			allowedKeys = append(allowedKeys, g.DefaultAttributes()...)
+		}
+	}
+
 	id := Instrument{
 		Name:        name,
 		Description: cfg.Description(),
 		Unit:        cfg.Unit(),
 		Kind:        InstrumentKindObservableCounter,
+		AllowedKeys: allowedKeys,
 		Scope:       m.scope,
 	}
 	return m.int64ObservableInstrument(id, cfg.Callbacks())
@@ -205,11 +249,20 @@ func (m *meter) Int64ObservableUpDownCounter(
 	options ...metric.Int64ObservableUpDownCounterOption,
 ) (metric.Int64ObservableUpDownCounter, error) {
 	cfg := metric.NewInt64ObservableUpDownCounterConfig(options...)
+
+	var allowedKeys []attribute.Key
+	for _, o := range options {
+		if g, ok := o.(defaultAttributesGetter); ok {
+			allowedKeys = append(allowedKeys, g.DefaultAttributes()...)
+		}
+	}
+
 	id := Instrument{
 		Name:        name,
 		Description: cfg.Description(),
 		Unit:        cfg.Unit(),
 		Kind:        InstrumentKindObservableUpDownCounter,
+		AllowedKeys: allowedKeys,
 		Scope:       m.scope,
 	}
 	return m.int64ObservableInstrument(id, cfg.Callbacks())
@@ -229,11 +282,20 @@ func (m *meter) Int64ObservableGauge(
 	options ...metric.Int64ObservableGaugeOption,
 ) (metric.Int64ObservableGauge, error) {
 	cfg := metric.NewInt64ObservableGaugeConfig(options...)
+
+	var allowedKeys []attribute.Key
+	for _, o := range options {
+		if g, ok := o.(defaultAttributesGetter); ok {
+			allowedKeys = append(allowedKeys, g.DefaultAttributes()...)
+		}
+	}
+
 	id := Instrument{
 		Name:        name,
 		Description: cfg.Description(),
 		Unit:        cfg.Unit(),
 		Kind:        InstrumentKindObservableGauge,
+		AllowedKeys: allowedKeys,
 		Scope:       m.scope,
 	}
 	return m.int64ObservableInstrument(id, cfg.Callbacks())
@@ -246,7 +308,15 @@ func (m *meter) Float64Counter(name string, options ...metric.Float64CounterOpti
 	cfg := metric.NewFloat64CounterConfig(options...)
 	const kind = InstrumentKindCounter
 	p := float64InstProvider{m}
-	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit())
+
+	var allowedKeys []attribute.Key
+	for _, o := range options {
+		if g, ok := o.(defaultAttributesGetter); ok {
+			allowedKeys = append(allowedKeys, g.DefaultAttributes()...)
+		}
+	}
+
+	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), allowedKeys)
 	if err != nil {
 		return i, err
 	}
@@ -264,7 +334,15 @@ func (m *meter) Float64UpDownCounter(
 	cfg := metric.NewFloat64UpDownCounterConfig(options...)
 	const kind = InstrumentKindUpDownCounter
 	p := float64InstProvider{m}
-	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit())
+
+	var allowedKeys []attribute.Key
+	for _, o := range options {
+		if g, ok := o.(defaultAttributesGetter); ok {
+			allowedKeys = append(allowedKeys, g.DefaultAttributes()...)
+		}
+	}
+
+	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), allowedKeys)
 	if err != nil {
 		return i, err
 	}
@@ -281,7 +359,15 @@ func (m *meter) Float64Histogram(
 ) (metric.Float64Histogram, error) {
 	cfg := metric.NewFloat64HistogramConfig(options...)
 	p := float64InstProvider{m}
-	i, err := p.lookupHistogram(name, cfg)
+
+	var allowedKeys []attribute.Key
+	for _, o := range options {
+		if g, ok := o.(defaultAttributesGetter); ok {
+			allowedKeys = append(allowedKeys, g.DefaultAttributes()...)
+		}
+	}
+
+	i, err := p.lookupHistogram(name, cfg, allowedKeys)
 	if err != nil {
 		return i, err
 	}
@@ -296,7 +382,15 @@ func (m *meter) Float64Gauge(name string, options ...metric.Float64GaugeOption) 
 	cfg := metric.NewFloat64GaugeConfig(options...)
 	const kind = InstrumentKindGauge
 	p := float64InstProvider{m}
-	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit())
+
+	var allowedKeys []attribute.Key
+	for _, o := range options {
+		if g, ok := o.(defaultAttributesGetter); ok {
+			allowedKeys = append(allowedKeys, g.DefaultAttributes()...)
+		}
+	}
+
+	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), allowedKeys)
 	if err != nil {
 		return i, err
 	}
@@ -363,11 +457,20 @@ func (m *meter) Float64ObservableCounter(
 	options ...metric.Float64ObservableCounterOption,
 ) (metric.Float64ObservableCounter, error) {
 	cfg := metric.NewFloat64ObservableCounterConfig(options...)
+
+	var allowedKeys []attribute.Key
+	for _, o := range options {
+		if g, ok := o.(defaultAttributesGetter); ok {
+			allowedKeys = append(allowedKeys, g.DefaultAttributes()...)
+		}
+	}
+
 	id := Instrument{
 		Name:        name,
 		Description: cfg.Description(),
 		Unit:        cfg.Unit(),
 		Kind:        InstrumentKindObservableCounter,
+		AllowedKeys: allowedKeys,
 		Scope:       m.scope,
 	}
 	return m.float64ObservableInstrument(id, cfg.Callbacks())
@@ -387,11 +490,20 @@ func (m *meter) Float64ObservableUpDownCounter(
 	options ...metric.Float64ObservableUpDownCounterOption,
 ) (metric.Float64ObservableUpDownCounter, error) {
 	cfg := metric.NewFloat64ObservableUpDownCounterConfig(options...)
+
+	var allowedKeys []attribute.Key
+	for _, o := range options {
+		if g, ok := o.(defaultAttributesGetter); ok {
+			allowedKeys = append(allowedKeys, g.DefaultAttributes()...)
+		}
+	}
+
 	id := Instrument{
 		Name:        name,
 		Description: cfg.Description(),
 		Unit:        cfg.Unit(),
 		Kind:        InstrumentKindObservableUpDownCounter,
+		AllowedKeys: allowedKeys,
 		Scope:       m.scope,
 	}
 	return m.float64ObservableInstrument(id, cfg.Callbacks())
@@ -411,11 +523,20 @@ func (m *meter) Float64ObservableGauge(
 	options ...metric.Float64ObservableGaugeOption,
 ) (metric.Float64ObservableGauge, error) {
 	cfg := metric.NewFloat64ObservableGaugeConfig(options...)
+
+	var allowedKeys []attribute.Key
+	for _, o := range options {
+		if g, ok := o.(defaultAttributesGetter); ok {
+			allowedKeys = append(allowedKeys, g.DefaultAttributes()...)
+		}
+	}
+
 	id := Instrument{
 		Name:        name,
 		Description: cfg.Description(),
 		Unit:        cfg.Unit(),
 		Kind:        InstrumentKindObservableGauge,
+		AllowedKeys: allowedKeys,
 		Scope:       m.scope,
 	}
 	return m.float64ObservableInstrument(id, cfg.Callbacks())
@@ -630,15 +751,15 @@ func (noopRegister) Unregister() error {
 	return nil
 }
 
-// int64InstProvider provides int64 OpenTelemetry instruments.
 type int64InstProvider struct{ *meter }
 
-func (p int64InstProvider) aggs(kind InstrumentKind, name, desc, u string) ([]aggregate.Measure[int64], error) {
+func (p int64InstProvider) aggs(kind InstrumentKind, name, desc, u string, allowedKeys []attribute.Key) ([]aggregate.Measure[int64], error) {
 	inst := Instrument{
 		Name:        name,
 		Description: desc,
 		Unit:        u,
 		Kind:        kind,
+		AllowedKeys: allowedKeys,
 		Scope:       p.scope,
 	}
 	return p.int64Resolver.Aggregators(inst)
@@ -647,6 +768,7 @@ func (p int64InstProvider) aggs(kind InstrumentKind, name, desc, u string) ([]ag
 func (p int64InstProvider) histogramAggs(
 	name string,
 	cfg metric.Int64HistogramConfig,
+	allowedKeys []attribute.Key,
 ) ([]aggregate.Measure[int64], error) {
 	boundaries := cfg.ExplicitBucketBoundaries()
 	aggError := AggregationExplicitBucketHistogram{Boundaries: boundaries}.err()
@@ -659,6 +781,7 @@ func (p int64InstProvider) histogramAggs(
 		Description: cfg.Description(),
 		Unit:        cfg.Unit(),
 		Kind:        InstrumentKindHistogram,
+		AllowedKeys: allowedKeys,
 		Scope:       p.scope,
 	}
 	measures, err := p.int64Resolver.HistogramAggregators(inst, boundaries)
@@ -666,40 +789,40 @@ func (p int64InstProvider) histogramAggs(
 }
 
 // lookup returns the resolved instrumentImpl.
-func (p int64InstProvider) lookup(kind InstrumentKind, name, desc, u string) (*int64Inst, error) {
+func (p int64InstProvider) lookup(kind InstrumentKind, name, desc, u string, allowedKeys []attribute.Key) (*int64Inst, error) {
 	return p.int64Insts.Lookup(instID{
 		Name:        name,
 		Description: desc,
 		Unit:        u,
 		Kind:        kind,
 	}, func() (*int64Inst, error) {
-		aggs, err := p.aggs(kind, name, desc, u)
+		aggs, err := p.aggs(kind, name, desc, u, allowedKeys)
 		return &int64Inst{measures: aggs}, err
 	})
 }
 
 // lookupHistogram returns the resolved instrumentImpl.
-func (p int64InstProvider) lookupHistogram(name string, cfg metric.Int64HistogramConfig) (*int64Inst, error) {
+func (p int64InstProvider) lookupHistogram(name string, cfg metric.Int64HistogramConfig, allowedKeys []attribute.Key) (*int64Inst, error) {
 	return p.int64Insts.Lookup(instID{
 		Name:        name,
 		Description: cfg.Description(),
 		Unit:        cfg.Unit(),
 		Kind:        InstrumentKindHistogram,
 	}, func() (*int64Inst, error) {
-		aggs, err := p.histogramAggs(name, cfg)
+		aggs, err := p.histogramAggs(name, cfg, allowedKeys)
 		return &int64Inst{measures: aggs}, err
 	})
 }
 
-// float64InstProvider provides float64 OpenTelemetry instruments.
 type float64InstProvider struct{ *meter }
 
-func (p float64InstProvider) aggs(kind InstrumentKind, name, desc, u string) ([]aggregate.Measure[float64], error) {
+func (p float64InstProvider) aggs(kind InstrumentKind, name, desc, u string, allowedKeys []attribute.Key) ([]aggregate.Measure[float64], error) {
 	inst := Instrument{
 		Name:        name,
 		Description: desc,
 		Unit:        u,
 		Kind:        kind,
+		AllowedKeys: allowedKeys,
 		Scope:       p.scope,
 	}
 	return p.float64Resolver.Aggregators(inst)
@@ -708,6 +831,7 @@ func (p float64InstProvider) aggs(kind InstrumentKind, name, desc, u string) ([]
 func (p float64InstProvider) histogramAggs(
 	name string,
 	cfg metric.Float64HistogramConfig,
+	allowedKeys []attribute.Key,
 ) ([]aggregate.Measure[float64], error) {
 	boundaries := cfg.ExplicitBucketBoundaries()
 	aggError := AggregationExplicitBucketHistogram{Boundaries: boundaries}.err()
@@ -720,6 +844,7 @@ func (p float64InstProvider) histogramAggs(
 		Description: cfg.Description(),
 		Unit:        cfg.Unit(),
 		Kind:        InstrumentKindHistogram,
+		AllowedKeys: allowedKeys,
 		Scope:       p.scope,
 	}
 	measures, err := p.float64Resolver.HistogramAggregators(inst, boundaries)
@@ -727,27 +852,27 @@ func (p float64InstProvider) histogramAggs(
 }
 
 // lookup returns the resolved instrumentImpl.
-func (p float64InstProvider) lookup(kind InstrumentKind, name, desc, u string) (*float64Inst, error) {
+func (p float64InstProvider) lookup(kind InstrumentKind, name, desc, u string, allowedKeys []attribute.Key) (*float64Inst, error) {
 	return p.float64Insts.Lookup(instID{
 		Name:        name,
 		Description: desc,
 		Unit:        u,
 		Kind:        kind,
 	}, func() (*float64Inst, error) {
-		aggs, err := p.aggs(kind, name, desc, u)
+		aggs, err := p.aggs(kind, name, desc, u, allowedKeys)
 		return &float64Inst{measures: aggs}, err
 	})
 }
 
 // lookupHistogram returns the resolved instrumentImpl.
-func (p float64InstProvider) lookupHistogram(name string, cfg metric.Float64HistogramConfig) (*float64Inst, error) {
+func (p float64InstProvider) lookupHistogram(name string, cfg metric.Float64HistogramConfig, allowedKeys []attribute.Key) (*float64Inst, error) {
 	return p.float64Insts.Lookup(instID{
 		Name:        name,
 		Description: cfg.Description(),
 		Unit:        cfg.Unit(),
 		Kind:        InstrumentKindHistogram,
 	}, func() (*float64Inst, error) {
-		aggs, err := p.histogramAggs(name, cfg)
+		aggs, err := p.histogramAggs(name, cfg, allowedKeys)
 		return &float64Inst{measures: aggs}, err
 	})
 }

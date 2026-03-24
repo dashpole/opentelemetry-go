@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/internal/global"
 	"go.opentelemetry.io/otel/metric/embedded"
 	"go.opentelemetry.io/otel/sdk/instrumentation"
@@ -278,6 +279,9 @@ func (i *inserter[N]) Instrument(inst Instrument, readerAggregation Aggregation)
 		Name:        inst.Name,
 		Description: inst.Description,
 		Unit:        inst.Unit,
+	}
+	if len(inst.AllowedKeys) > 0 {
+		stream.AttributeFilter = attribute.NewAllowKeysFilter(inst.AllowedKeys...)
 	}
 	in, _, e := i.cachedAggregator(inst.Scope, inst.Kind, stream, readerAggregation)
 	if e != nil {

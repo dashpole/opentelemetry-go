@@ -70,6 +70,11 @@ type Instrument struct {
 	// Scope identifies the instrumentation that created the instrument.
 	Scope instrumentation.Scope
 
+	// AllowedKeys is an optional list of attribute keys that are allowed to be
+	// recorded by default. If non-empty, attributes not in this list will be
+	// filtered out by default.
+	AllowedKeys []attribute.Key
+
 	// Ensure forward compatibility if non-comparable fields need to be added.
 	nonComparable // nolint: unused
 }
