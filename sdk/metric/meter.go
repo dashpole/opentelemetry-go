@@ -212,7 +212,6 @@ func (m *meter) Int64ObservableUpDownCounter(
 	options ...metric.Int64ObservableUpDownCounterOption,
 ) (metric.Int64ObservableUpDownCounter, error) {
 	cfg := x.NewInt64ObservableUpDownCounterConfig(options...)
-
 	id := Instrument{
 		Name:        name,
 		Description: cfg.Description(),
@@ -237,7 +236,6 @@ func (m *meter) Int64ObservableGauge(
 	options ...metric.Int64ObservableGaugeOption,
 ) (metric.Int64ObservableGauge, error) {
 	cfg := x.NewInt64ObservableGaugeConfig(options...)
-
 	id := Instrument{
 		Name:        name,
 		Description: cfg.Description(),
@@ -255,7 +253,6 @@ func (m *meter) Float64Counter(name string, options ...metric.Float64CounterOpti
 	cfg := x.NewFloat64CounterConfig(options...)
 	const kind = InstrumentKindCounter
 	p := float64InstProvider{m}
-
 	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), cfg.DefaultAttributes())
 	if err != nil {
 		return i, err
@@ -274,7 +271,6 @@ func (m *meter) Float64UpDownCounter(
 	cfg := x.NewFloat64UpDownCounterConfig(options...)
 	const kind = InstrumentKindUpDownCounter
 	p := float64InstProvider{m}
-
 	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), cfg.DefaultAttributes())
 	if err != nil {
 		return i, err
@@ -292,7 +288,6 @@ func (m *meter) Float64Histogram(
 ) (metric.Float64Histogram, error) {
 	cfg := x.NewFloat64HistogramConfig(options...)
 	p := float64InstProvider{m}
-
 	i, err := p.lookupHistogram(name, cfg.Float64HistogramConfig, cfg.DefaultAttributes())
 	if err != nil {
 		return i, err
@@ -308,7 +303,6 @@ func (m *meter) Float64Gauge(name string, options ...metric.Float64GaugeOption) 
 	cfg := x.NewFloat64GaugeConfig(options...)
 	const kind = InstrumentKindGauge
 	p := float64InstProvider{m}
-
 	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), cfg.DefaultAttributes())
 	if err != nil {
 		return i, err
@@ -377,7 +371,6 @@ func (m *meter) Float64ObservableCounter(
 	options ...metric.Float64ObservableCounterOption,
 ) (metric.Float64ObservableCounter, error) {
 	cfg := x.NewFloat64ObservableCounterConfig(options...)
-
 	id := Instrument{
 		Name:        name,
 		Description: cfg.Description(),
@@ -402,7 +395,6 @@ func (m *meter) Float64ObservableUpDownCounter(
 	options ...metric.Float64ObservableUpDownCounterOption,
 ) (metric.Float64ObservableUpDownCounter, error) {
 	cfg := x.NewFloat64ObservableUpDownCounterConfig(options...)
-
 	id := Instrument{
 		Name:        name,
 		Description: cfg.Description(),
@@ -427,7 +419,6 @@ func (m *meter) Float64ObservableGauge(
 	options ...metric.Float64ObservableGaugeOption,
 ) (metric.Float64ObservableGauge, error) {
 	cfg := x.NewFloat64ObservableGaugeConfig(options...)
-
 	id := Instrument{
 		Name:        name,
 		Description: cfg.Description(),

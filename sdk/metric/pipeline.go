@@ -667,6 +667,7 @@ func newResolver[N int64 | float64](p pipelines, vc *cache[string, instID]) reso
 // defined by key.
 func (r resolver[N]) Aggregators(id Instrument, allowedKeys []attribute.Key) ([]aggregate.Measure[N], error) {
 	var measures []aggregate.Measure[N]
+
 	var err error
 	for _, i := range r.inserters {
 		in, e := i.Instrument(id, allowedKeys, i.readerDefaultAggregation(id.Kind))
@@ -683,6 +684,7 @@ func (r resolver[N]) Aggregators(id Instrument, allowedKeys []attribute.Key) ([]
 // over boundaries provided by the reader.
 func (r resolver[N]) HistogramAggregators(id Instrument, allowedKeys []attribute.Key, boundaries []float64) ([]aggregate.Measure[N], error) {
 	var measures []aggregate.Measure[N]
+
 	var err error
 	for _, i := range r.inserters {
 		agg := i.readerDefaultAggregation(id.Kind)

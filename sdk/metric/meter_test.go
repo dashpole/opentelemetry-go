@@ -2629,7 +2629,7 @@ func TestExemplarFilter(t *testing.T) {
 	metricdatatest.AssertEqual(t, want, got, metricdatatest.IgnoreTimestamp())
 }
 
-func TestMeterDefaultAttributes(t *testing.T) {
+func TestMeterExperimentalDefaultAttributes(t *testing.T) {
 	k1 := attribute.Key("k1")
 	k2 := attribute.Key("k2")
 
@@ -2909,7 +2909,7 @@ func TestMeterDefaultAttributes(t *testing.T) {
 	}
 
 	for _, tt := range testCases {
-		t.Run(tt.name+"_DefaultBehavior", func(t *testing.T) {
+		t.Run(tt.name+"/DefaultBehavior", func(t *testing.T) {
 			rdr := NewManualReader()
 			m := NewMeterProvider(WithReader(rdr)).Meter("test")
 			tt.record(t, m)
@@ -2930,7 +2930,7 @@ func TestMeterDefaultAttributes(t *testing.T) {
 			metricdatatest.AssertEqual(t, want, got, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars())
 		})
 
-		t.Run(tt.name+"_ViewOverride", func(t *testing.T) {
+		t.Run(tt.name+"/ViewOverride", func(t *testing.T) {
 			rdr := NewManualReader()
 			view := NewView(Instrument{Name: "*"}, Stream{}) // Match all instruments, override filter
 			m := NewMeterProvider(WithReader(rdr), WithView(view)).Meter("test")
