@@ -6,7 +6,6 @@ package metric // import "go.opentelemetry.io/otel/metric"
 import (
 	"context"
 
-	"go.opentelemetry.io/otel/metric/internal/x"
 	"go.opentelemetry.io/otel/metric/embedded"
 )
 
@@ -51,9 +50,6 @@ type Int64ObservableCounterConfig struct {
 func NewInt64ObservableCounterConfig(opts ...Int64ObservableCounterOption) Int64ObservableCounterConfig {
 	var config Int64ObservableCounterConfig
 	for _, o := range opts {
-		if _, ok := o.(x.ExperimentalOption); ok {
-			continue
-		}
 		config = o.applyInt64ObservableCounter(config)
 	}
 	return config
@@ -114,9 +110,6 @@ func NewInt64ObservableUpDownCounterConfig(
 ) Int64ObservableUpDownCounterConfig {
 	var config Int64ObservableUpDownCounterConfig
 	for _, o := range opts {
-		if _, ok := o.(x.ExperimentalOption); ok {
-			continue
-		}
 		config = o.applyInt64ObservableUpDownCounter(config)
 	}
 	return config
@@ -174,9 +167,6 @@ type Int64ObservableGaugeConfig struct {
 func NewInt64ObservableGaugeConfig(opts ...Int64ObservableGaugeOption) Int64ObservableGaugeConfig {
 	var config Int64ObservableGaugeConfig
 	for _, o := range opts {
-		if _, ok := o.(x.ExperimentalOption); ok {
-			continue
-		}
 		config = o.applyInt64ObservableGauge(config)
 	}
 	return config
