@@ -22,6 +22,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/internal/global"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/x"
 	"go.opentelemetry.io/otel/sdk/instrumentation"
 	"go.opentelemetry.io/otel/sdk/metric/exemplar"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -2626,4 +2627,553 @@ func TestExemplarFilter(t *testing.T) {
 	err = rdr.Collect(t.Context(), &got)
 	assert.NoError(t, err)
 	metricdatatest.AssertEqual(t, want, got, metricdatatest.IgnoreTimestamp())
+}
+
+func TestMeterDefaultAttributes(t *testing.T) {
+	k1 := attribute.Key("k1")
+	k2 := attribute.Key("k2")
+
+	alice := attribute.NewSet(k1.String("alice"))
+	combined := attribute.NewSet(k1.String("alice"), k2.String("bob"))
+
+	testCases := []struct {
+		name string
+		run  func(t *testing.T, rdr *ManualReader, m metric.Meter, useView bool)
+	}{
+		{
+			name: "Int64Counter",
+			run: func(t *testing.T, rdr *ManualReader, m metric.Meter, useView bool) {
+				ctr, err := m.Int64Counter("sint", x.WithDefaultAttributes(k1))
+				require.NoError(t, err)
+
+				ctr.Add(t.Context(), 3, metric.WithAttributes(k1.String("alice"), k2.String("bob")))
+
+				rm := metricdata.ResourceMetrics{}
+				err = rdr.Collect(t.Context(), &rm)
+				require.NoError(t, err)
+
+				require.Len(t, rm.ScopeMetrics, 1)
+				sm := rm.ScopeMetrics[0]
+				require.Len(t, sm.Metrics, 1)
+				got := sm.Metrics[0]
+
+				wantAttrs := alice
+				if useView {
+					wantAttrs = combined
+				}
+
+				want := metricdata.Metrics{
+					Name: "sint",
+					Data: metricdata.Sum[int64]{
+						Temporality: metricdata.CumulativeTemporality,
+						IsMonotonic: true,
+						DataPoints: []metricdata.DataPoint[int64]{
+							{Attributes: wantAttrs, Value: 3},
+						},
+					},
+				}
+				metricdatatest.AssertEqual(t, want, got, metricdatatest.IgnoreTimestamp())
+			},
+		},
+		{
+			name: "Float64Counter",
+			run: func(t *testing.T, rdr *ManualReader, m metric.Meter, useView bool) {
+				ctr, err := m.Float64Counter("sfloat", x.WithDefaultAttributes(k1))
+				require.NoError(t, err)
+
+				ctr.Add(t.Context(), 3.5, metric.WithAttributes(k1.String("alice"), k2.String("bob")))
+
+				rm := metricdata.ResourceMetrics{}
+				err = rdr.Collect(t.Context(), &rm)
+				require.NoError(t, err)
+
+				require.Len(t, rm.ScopeMetrics, 1)
+				sm := rm.ScopeMetrics[0]
+				require.Len(t, sm.Metrics, 1)
+				got := sm.Metrics[0]
+
+				wantAttrs := alice
+				if useView {
+					wantAttrs = combined
+				}
+
+				want := metricdata.Metrics{
+					Name: "sfloat",
+					Data: metricdata.Sum[float64]{
+						Temporality: metricdata.CumulativeTemporality,
+						IsMonotonic: true,
+						DataPoints: []metricdata.DataPoint[float64]{
+							{Attributes: wantAttrs, Value: 3.5},
+						},
+					},
+				}
+				metricdatatest.AssertEqual(t, want, got, metricdatatest.IgnoreTimestamp())
+			},
+		},
+		{
+			name: "Int64Histogram",
+			run: func(t *testing.T, rdr *ManualReader, m metric.Meter, useView bool) {
+				histo, err := m.Int64Histogram("shist", x.WithDefaultAttributes(k1))
+				require.NoError(t, err)
+
+				histo.Record(t.Context(), 7, metric.WithAttributes(k1.String("alice"), k2.String("bob")))
+
+				rm := metricdata.ResourceMetrics{}
+				err = rdr.Collect(t.Context(), &rm)
+				require.NoError(t, err)
+
+				require.Len(t, rm.ScopeMetrics, 1)
+				sm := rm.ScopeMetrics[0]
+				require.Len(t, sm.Metrics, 1)
+				got := sm.Metrics[0]
+
+				wantAttrs := alice
+				if useView {
+					wantAttrs = combined
+				}
+
+				want := metricdata.Metrics{
+					Name: "shist",
+					Data: metricdata.Histogram[int64]{
+						Temporality: metricdata.CumulativeTemporality,
+						DataPoints: []metricdata.HistogramDataPoint[int64]{
+							{
+								Attributes:   wantAttrs,
+								Count:        1,
+								Bounds:       []float64{0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000},
+								BucketCounts: []uint64{0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+								Min:          metricdata.NewExtrema[int64](7),
+								Max:          metricdata.NewExtrema[int64](7),
+								Sum:          7,
+							},
+						},
+					},
+				}
+				metricdatatest.AssertEqual(t, want, got, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars())
+			},
+		},
+		{
+			name: "Int64ObservableCounter",
+			run: func(t *testing.T, rdr *ManualReader, m metric.Meter, useView bool) {
+				_, err := m.Int64ObservableCounter("aint",
+					x.WithDefaultAttributes(k1),
+					metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+						o.Observe(4, metric.WithAttributes(k1.String("alice"), k2.String("bob")))
+						return nil
+					}),
+				)
+				require.NoError(t, err)
+
+				rm := metricdata.ResourceMetrics{}
+				err = rdr.Collect(t.Context(), &rm)
+				require.NoError(t, err)
+
+				require.Len(t, rm.ScopeMetrics, 1)
+				sm := rm.ScopeMetrics[0]
+				require.Len(t, sm.Metrics, 1)
+				got := sm.Metrics[0]
+
+				wantAttrs := alice
+				if useView {
+					wantAttrs = combined
+				}
+
+				want := metricdata.Metrics{
+					Name: "aint",
+					Data: metricdata.Sum[int64]{
+						Temporality: metricdata.CumulativeTemporality,
+						IsMonotonic: true,
+						DataPoints: []metricdata.DataPoint[int64]{
+							{Attributes: wantAttrs, Value: 4},
+						},
+					},
+				}
+				metricdatatest.AssertEqual(t, want, got, metricdatatest.IgnoreTimestamp())
+			},
+		},
+		{
+			name: "Int64UpDownCounter",
+			run: func(t *testing.T, rdr *ManualReader, m metric.Meter, useView bool) {
+				ctr, err := m.Int64UpDownCounter("supdown", x.WithDefaultAttributes(k1))
+				require.NoError(t, err)
+
+				ctr.Add(t.Context(), 3, metric.WithAttributes(k1.String("alice"), k2.String("bob")))
+
+				rm := metricdata.ResourceMetrics{}
+				err = rdr.Collect(t.Context(), &rm)
+				require.NoError(t, err)
+
+				require.Len(t, rm.ScopeMetrics, 1)
+				sm := rm.ScopeMetrics[0]
+				require.Len(t, sm.Metrics, 1)
+				got := sm.Metrics[0]
+
+				wantAttrs := alice
+				if useView {
+					wantAttrs = combined
+				}
+
+				want := metricdata.Metrics{
+					Name: "supdown",
+					Data: metricdata.Sum[int64]{
+						Temporality: metricdata.CumulativeTemporality,
+						IsMonotonic: false,
+						DataPoints: []metricdata.DataPoint[int64]{
+							{Attributes: wantAttrs, Value: 3},
+						},
+					},
+				}
+				metricdatatest.AssertEqual(t, want, got, metricdatatest.IgnoreTimestamp())
+			},
+		},
+		{
+			name: "Float64UpDownCounter",
+			run: func(t *testing.T, rdr *ManualReader, m metric.Meter, useView bool) {
+				ctr, err := m.Float64UpDownCounter("supdown_float", x.WithDefaultAttributes(k1))
+				require.NoError(t, err)
+
+				ctr.Add(t.Context(), 3.5, metric.WithAttributes(k1.String("alice"), k2.String("bob")))
+
+				rm := metricdata.ResourceMetrics{}
+				err = rdr.Collect(t.Context(), &rm)
+				require.NoError(t, err)
+
+				require.Len(t, rm.ScopeMetrics, 1)
+				sm := rm.ScopeMetrics[0]
+				require.Len(t, sm.Metrics, 1)
+				got := sm.Metrics[0]
+
+				wantAttrs := alice
+				if useView {
+					wantAttrs = combined
+				}
+
+				want := metricdata.Metrics{
+					Name: "supdown_float",
+					Data: metricdata.Sum[float64]{
+						Temporality: metricdata.CumulativeTemporality,
+						IsMonotonic: false,
+						DataPoints: []metricdata.DataPoint[float64]{
+							{Attributes: wantAttrs, Value: 3.5},
+						},
+					},
+				}
+				metricdatatest.AssertEqual(t, want, got, metricdatatest.IgnoreTimestamp())
+			},
+		},
+		{
+			name: "Int64Gauge",
+			run: func(t *testing.T, rdr *ManualReader, m metric.Meter, useView bool) {
+				gauge, err := m.Int64Gauge("sgauge", x.WithDefaultAttributes(k1))
+				require.NoError(t, err)
+
+				gauge.Record(t.Context(), 11, metric.WithAttributes(k1.String("alice"), k2.String("bob")))
+
+				rm := metricdata.ResourceMetrics{}
+				err = rdr.Collect(t.Context(), &rm)
+				require.NoError(t, err)
+
+				require.Len(t, rm.ScopeMetrics, 1)
+				sm := rm.ScopeMetrics[0]
+				require.Len(t, sm.Metrics, 1)
+				got := sm.Metrics[0]
+
+				wantAttrs := alice
+				if useView {
+					wantAttrs = combined
+				}
+
+				want := metricdata.Metrics{
+					Name: "sgauge",
+					Data: metricdata.Gauge[int64]{
+						DataPoints: []metricdata.DataPoint[int64]{
+							{Attributes: wantAttrs, Value: 11},
+						},
+					},
+				}
+				metricdatatest.AssertEqual(t, want, got, metricdatatest.IgnoreTimestamp())
+			},
+		},
+		{
+			name: "Float64Gauge",
+			run: func(t *testing.T, rdr *ManualReader, m metric.Meter, useView bool) {
+				gauge, err := m.Float64Gauge("sgauge_float", x.WithDefaultAttributes(k1))
+				require.NoError(t, err)
+
+				gauge.Record(t.Context(), 11.5, metric.WithAttributes(k1.String("alice"), k2.String("bob")))
+
+				rm := metricdata.ResourceMetrics{}
+				err = rdr.Collect(t.Context(), &rm)
+				require.NoError(t, err)
+
+				require.Len(t, rm.ScopeMetrics, 1)
+				sm := rm.ScopeMetrics[0]
+				require.Len(t, sm.Metrics, 1)
+				got := sm.Metrics[0]
+
+				wantAttrs := alice
+				if useView {
+					wantAttrs = combined
+				}
+
+				want := metricdata.Metrics{
+					Name: "sgauge_float",
+					Data: metricdata.Gauge[float64]{
+						DataPoints: []metricdata.DataPoint[float64]{
+							{Attributes: wantAttrs, Value: 11.5},
+						},
+					},
+				}
+				metricdatatest.AssertEqual(t, want, got, metricdatatest.IgnoreTimestamp())
+			},
+		},
+		{
+			name: "Float64Histogram",
+			run: func(t *testing.T, rdr *ManualReader, m metric.Meter, useView bool) {
+				histo, err := m.Float64Histogram("shist_float", x.WithDefaultAttributes(k1))
+				require.NoError(t, err)
+
+				histo.Record(t.Context(), 7.0, metric.WithAttributes(k1.String("alice"), k2.String("bob")))
+
+				rm := metricdata.ResourceMetrics{}
+				err = rdr.Collect(t.Context(), &rm)
+				require.NoError(t, err)
+
+				require.Len(t, rm.ScopeMetrics, 1)
+				sm := rm.ScopeMetrics[0]
+				require.Len(t, sm.Metrics, 1)
+				got := sm.Metrics[0]
+
+				wantAttrs := alice
+				if useView {
+					wantAttrs = combined
+				}
+
+				want := metricdata.Metrics{
+					Name: "shist_float",
+					Data: metricdata.Histogram[float64]{
+						Temporality: metricdata.CumulativeTemporality,
+						DataPoints: []metricdata.HistogramDataPoint[float64]{
+							{
+								Attributes:   wantAttrs,
+								Count:        1,
+								Bounds:       []float64{0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000},
+								BucketCounts: []uint64{0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+								Min:          metricdata.NewExtrema[float64](7.0),
+								Max:          metricdata.NewExtrema[float64](7.0),
+								Sum:          7.0,
+							},
+						},
+					},
+				}
+				metricdatatest.AssertEqual(t, want, got, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars())
+			},
+		},
+		{
+			name: "Float64ObservableCounter",
+			run: func(t *testing.T, rdr *ManualReader, m metric.Meter, useView bool) {
+				_, err := m.Float64ObservableCounter("afloat",
+					x.WithDefaultAttributes(k1),
+					metric.WithFloat64Callback(func(_ context.Context, o metric.Float64Observer) error {
+						o.Observe(4.5, metric.WithAttributes(k1.String("alice"), k2.String("bob")))
+						return nil
+					}),
+				)
+				require.NoError(t, err)
+
+				rm := metricdata.ResourceMetrics{}
+				err = rdr.Collect(t.Context(), &rm)
+				require.NoError(t, err)
+
+				require.Len(t, rm.ScopeMetrics, 1)
+				sm := rm.ScopeMetrics[0]
+				require.Len(t, sm.Metrics, 1)
+				got := sm.Metrics[0]
+
+				wantAttrs := alice
+				if useView {
+					wantAttrs = combined
+				}
+
+				want := metricdata.Metrics{
+					Name: "afloat",
+					Data: metricdata.Sum[float64]{
+						Temporality: metricdata.CumulativeTemporality,
+						IsMonotonic: true,
+						DataPoints: []metricdata.DataPoint[float64]{
+							{Attributes: wantAttrs, Value: 4.5},
+						},
+					},
+				}
+				metricdatatest.AssertEqual(t, want, got, metricdatatest.IgnoreTimestamp())
+			},
+		},
+		{
+			name: "Int64ObservableUpDownCounter",
+			run: func(t *testing.T, rdr *ManualReader, m metric.Meter, useView bool) {
+				_, err := m.Int64ObservableUpDownCounter("aud",
+					x.WithDefaultAttributes(k1),
+					metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+						o.Observe(4, metric.WithAttributes(k1.String("alice"), k2.String("bob")))
+						return nil
+					}),
+				)
+				require.NoError(t, err)
+
+				rm := metricdata.ResourceMetrics{}
+				err = rdr.Collect(t.Context(), &rm)
+				require.NoError(t, err)
+
+				require.Len(t, rm.ScopeMetrics, 1)
+				sm := rm.ScopeMetrics[0]
+				require.Len(t, sm.Metrics, 1)
+				got := sm.Metrics[0]
+
+				wantAttrs := alice
+				if useView {
+					wantAttrs = combined
+				}
+
+				want := metricdata.Metrics{
+					Name: "aud",
+					Data: metricdata.Sum[int64]{
+						Temporality: metricdata.CumulativeTemporality,
+						IsMonotonic: false,
+						DataPoints: []metricdata.DataPoint[int64]{
+							{Attributes: wantAttrs, Value: 4},
+						},
+					},
+				}
+				metricdatatest.AssertEqual(t, want, got, metricdatatest.IgnoreTimestamp())
+			},
+		},
+		{
+			name: "Float64ObservableUpDownCounter",
+			run: func(t *testing.T, rdr *ManualReader, m metric.Meter, useView bool) {
+				_, err := m.Float64ObservableUpDownCounter("aud_float",
+					x.WithDefaultAttributes(k1),
+					metric.WithFloat64Callback(func(_ context.Context, o metric.Float64Observer) error {
+						o.Observe(4.5, metric.WithAttributes(k1.String("alice"), k2.String("bob")))
+						return nil
+					}),
+				)
+				require.NoError(t, err)
+
+				rm := metricdata.ResourceMetrics{}
+				err = rdr.Collect(t.Context(), &rm)
+				require.NoError(t, err)
+
+				require.Len(t, rm.ScopeMetrics, 1)
+				sm := rm.ScopeMetrics[0]
+				require.Len(t, sm.Metrics, 1)
+				got := sm.Metrics[0]
+
+				wantAttrs := alice
+				if useView {
+					wantAttrs = combined
+				}
+
+				want := metricdata.Metrics{
+					Name: "aud_float",
+					Data: metricdata.Sum[float64]{
+						Temporality: metricdata.CumulativeTemporality,
+						IsMonotonic: false,
+						DataPoints: []metricdata.DataPoint[float64]{
+							{Attributes: wantAttrs, Value: 4.5},
+						},
+					},
+				}
+				metricdatatest.AssertEqual(t, want, got, metricdatatest.IgnoreTimestamp())
+			},
+		},
+		{
+			name: "Int64ObservableGauge",
+			run: func(t *testing.T, rdr *ManualReader, m metric.Meter, useView bool) {
+				_, err := m.Int64ObservableGauge("agauge_async",
+					x.WithDefaultAttributes(k1),
+					metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+						o.Observe(4, metric.WithAttributes(k1.String("alice"), k2.String("bob")))
+						return nil
+					}),
+				)
+				require.NoError(t, err)
+
+				rm := metricdata.ResourceMetrics{}
+				err = rdr.Collect(t.Context(), &rm)
+				require.NoError(t, err)
+
+				require.Len(t, rm.ScopeMetrics, 1)
+				sm := rm.ScopeMetrics[0]
+				require.Len(t, sm.Metrics, 1)
+				got := sm.Metrics[0]
+
+				wantAttrs := alice
+				if useView {
+					wantAttrs = combined
+				}
+
+				want := metricdata.Metrics{
+					Name: "agauge_async",
+					Data: metricdata.Gauge[int64]{
+						DataPoints: []metricdata.DataPoint[int64]{
+							{Attributes: wantAttrs, Value: 4},
+						},
+					},
+				}
+				metricdatatest.AssertEqual(t, want, got, metricdatatest.IgnoreTimestamp())
+			},
+		},
+	{
+			name: "Float64ObservableGauge",
+			run: func(t *testing.T, rdr *ManualReader, m metric.Meter, useView bool) {
+				_, err := m.Float64ObservableGauge("agauge_float_async",
+					x.WithDefaultAttributes(k1),
+					metric.WithFloat64Callback(func(_ context.Context, o metric.Float64Observer) error {
+						o.Observe(4.5, metric.WithAttributes(k1.String("alice"), k2.String("bob")))
+						return nil
+					}),
+				)
+				require.NoError(t, err)
+
+				rm := metricdata.ResourceMetrics{}
+				err = rdr.Collect(t.Context(), &rm)
+				require.NoError(t, err)
+
+				require.Len(t, rm.ScopeMetrics, 1)
+				sm := rm.ScopeMetrics[0]
+				require.Len(t, sm.Metrics, 1)
+				got := sm.Metrics[0]
+
+				wantAttrs := alice
+				if useView {
+					wantAttrs = combined
+				}
+
+				want := metricdata.Metrics{
+					Name: "agauge_float_async",
+					Data: metricdata.Gauge[float64]{
+						DataPoints: []metricdata.DataPoint[float64]{
+							{Attributes: wantAttrs, Value: 4.5},
+						},
+					},
+				}
+				metricdatatest.AssertEqual(t, want, got, metricdatatest.IgnoreTimestamp())
+			},
+		},
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.name+"_DefaultBehavior", func(t *testing.T) {
+			rdr := NewManualReader()
+			m := NewMeterProvider(WithReader(rdr)).Meter("test")
+			tt.run(t, rdr, m, false)
+		})
+
+		t.Run(tt.name+"_ViewOverride", func(t *testing.T) {
+			rdr := NewManualReader()
+			view := NewView(Instrument{Name: "*"}, Stream{}) // Match all instruments, override filter
+			m := NewMeterProvider(WithReader(rdr), WithView(view)).Meter("test")
+			tt.run(t, rdr, m, true)
+		})
+	}
 }
