@@ -666,35 +666,35 @@ func newResolver[N int64 | float64](p pipelines, vc *cache[string, instID]) reso
 // Aggregators returns the Aggregators that must be updated by the instrument
 // defined by key.
 func (r resolver[N]) Aggregators(id Instrument, allowedKeys []attribute.Key) ([]aggregate.Measure[N], error) {
-	var aggs []aggregate.Measure[N]
-	var errs []error
-	for _, insert := range r.inserters {
-		a, err := insert.Instrument(id, allowedKeys, insert.readerDefaultAggregation(id.Kind))
-		if err != nil {
-			errs = append(errs, err)
+	var measures []aggregate.Measure[N]
+	var err error
+	for _, i := range r.inserters {
+		in, e := i.Instrument(id, allowedKeys, i.readerDefaultAggregation(id.Kind))
+		if e != nil {
+			err = errors.Join(err, e)
 		}
-		aggs = append(aggs, a...)
+		measures = append(measures, in...)
 	}
-	return aggs, errors.Join(errs...)
+	return measures, err
 }
 
 // HistogramAggregators returns the histogram Aggregators that must be updated by the instrument
 // defined by key. If boundaries were provided on instrument instantiation, those take precedence
 // over boundaries provided by the reader.
 func (r resolver[N]) HistogramAggregators(id Instrument, allowedKeys []attribute.Key, boundaries []float64) ([]aggregate.Measure[N], error) {
-	var aggs []aggregate.Measure[N]
-	var errs []error
-	for _, insert := range r.inserters {
-		agg := insert.readerDefaultAggregation(id.Kind)
+	var measures []aggregate.Measure[N]
+	var err error
+	for _, i := range r.inserters {
+		agg := i.readerDefaultAggregation(id.Kind)
 		if histAgg, ok := agg.(AggregationExplicitBucketHistogram); ok && len(boundaries) > 0 {
 			histAgg.Boundaries = boundaries
 			agg = histAgg
 		}
-		a, err := insert.Instrument(id, allowedKeys, agg)
-		if err != nil {
-			errs = append(errs, err)
+		in, e := i.Instrument(id, allowedKeys, agg)
+		if e != nil {
+			err = errors.Join(err, e)
 		}
-		aggs = append(aggs, a...)
+		measures = append(measures, in...)
 	}
-	return aggs, errors.Join(errs...)
+	return measures, err
 }
