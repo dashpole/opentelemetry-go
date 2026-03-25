@@ -6,7 +6,7 @@ package metric // import "go.opentelemetry.io/otel/metric"
 import (
 	"context"
 
-	"go.opentelemetry.io/otel/internal/x"
+	"go.opentelemetry.io/otel/metric/internal/x"
 	"go.opentelemetry.io/otel/metric/embedded"
 )
 

@@ -5,7 +5,7 @@ package x // import "go.opentelemetry.io/otel/metric/x"
 
 import (
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/internal/x"
+	"go.opentelemetry.io/otel/metric/internal/x"
 	"go.opentelemetry.io/otel/metric"
 )
 

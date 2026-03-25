@@ -16,6 +16,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/internal/aggregate"
 )
 
+// ErrInstrumentName indicates the created instrument has an invalid name.
+// Valid names must consist of 255 or fewer characters including alphanumeric, _, ., -, / and start with a letter.
 var ErrInstrumentName = errors.New("invalid instrument name")
 
 type defaultAttributesGetter interface {
