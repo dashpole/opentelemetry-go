@@ -9,12 +9,14 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/contextual"
 	"go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/embedded"
 	"go.opentelemetry.io/otel/sdk/instrumentation"
 	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
 	"go.opentelemetry.io/otel/trace"
 )
+
 
 var now = time.Now
 
@@ -116,8 +118,16 @@ func (l *logger) newRecord(ctx context.Context, r log.Record) Record {
 		newRecord.observedTimestamp = now()
 	}
 
+	ctxAttrs := contextual.AttributesFromContext(ctx)
+	for _, kv := range ctxAttrs.All() {
+		newRecord.AddAttributes(log.KeyValueFromAttribute(kv))
+	}
+
+
+
 	hasExceptionAttr := false
 	r.WalkAttributes(func(kv log.KeyValue) bool {
+
 		switch kv.Key {
 		case exceptionTypeKey, exceptionMessageKey, exceptionStacktraceKey:
 			hasExceptionAttr = true

@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/contextual"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
+
 
 // now is used to return the current local time while allowing tests to
 // override the default time.Now function.
@@ -60,17 +62,37 @@ func (b Builder[N]) resFunc() func(attribute.Set) FilteredExemplarReservoir[N] {
 type fltrMeasure[N int64 | float64] func(ctx context.Context, value N, fltrAttr attribute.Set, droppedAttr []attribute.KeyValue)
 
 func (b Builder[N]) filter(f fltrMeasure[N]) Measure[N] {
-	if b.Filter != nil {
-		fltr := b.Filter // Copy to make it immutable after assignment.
-		return func(ctx context.Context, n N, a attribute.Set) {
-			fAttr, dropped := a.Filter(fltr)
-			f(ctx, n, fAttr, dropped)
-		}
-	}
 	return func(ctx context.Context, n N, a attribute.Set) {
-		f(ctx, n, a, nil)
+		ctxAttrs := contextual.AttributesFromContext(ctx)
+
+		var fAttr attribute.Set
+		var dropped []attribute.KeyValue
+
+		if b.Filter != nil {
+			// Custom View: pass ALL context attributes to View filter.
+			var allKVs []attribute.KeyValue
+			allKVs = append(allKVs, a.ToSlice()...)
+			allKVs = append(allKVs, ctxAttrs.Metric.ToSlice()...)
+			allKVs = append(allKVs, ctxAttrs.Exemplar.ToSlice()...)
+			allAttrs := attribute.NewSet(allKVs...)
+
+			fAttr, dropped = allAttrs.Filter(b.Filter)
+		} else {
+			// Default View: only keep measurement attributes + opted-in context attributes.
+			var keptKVs []attribute.KeyValue
+			keptKVs = append(keptKVs, a.ToSlice()...)
+			keptKVs = append(keptKVs, ctxAttrs.Metric.ToSlice()...)
+			fAttr = attribute.NewSet(keptKVs...)
+
+			// Dropped are those that were not kept for metrics.
+			dropped = ctxAttrs.Exemplar.ToSlice()
+		}
+
+		f(ctx, n, fAttr, dropped)
 	}
 }
+
+
 
 // LastValue returns a last-value aggregate function input and output.
 func (b Builder[N]) LastValue() (Measure[N], ComputeAggregation) {

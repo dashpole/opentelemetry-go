@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/contextual"
+
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -670,3 +673,30 @@ func (m *errMeter) Int64Counter(string, ...metric.Int64CounterOption) (metric.In
 func (m *errMeter) Int64UpDownCounter(string, ...metric.Int64UpDownCounterOption) (metric.Int64UpDownCounter, error) {
 	return nil, m.err
 }
+
+func TestLoggerContextAttributes(t *testing.T) {
+	p := newProcessor("0")
+	l := newLogger(NewLoggerProvider(WithProcessor(p)), instrumentation.Scope{})
+
+	ctx := context.Background()
+	attrs := attribute.NewSet(attribute.String("k1", "v1"))
+	ctx = contextual.ContextWithAttributes(ctx, attrs)
+
+	var r log.Record
+	r.SetBody(log.StringValue("test"))
+	l.Emit(ctx, r)
+
+	require.Len(t, p.records, 1)
+	record := p.records[0]
+
+	found := false
+	record.WalkAttributes(func(kv log.KeyValue) bool {
+		if kv.Key == "k1" && kv.Value.AsString() == "v1" {
+			found = true
+			return false
+		}
+		return true
+	})
+	assert.True(t, found, "Attribute k1=v1 not found in log record")
+}
+

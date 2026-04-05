@@ -7,6 +7,9 @@ import (
 	"context"
 	"strconv"
 	"sync"
+
+	"go.opentelemetry.io/otel/contextual"
+
 	"sync/atomic"
 	"testing"
 	"time"
@@ -87,7 +90,7 @@ func testBuilderFilter[N int64 | float64]() func(t *testing.T) {
 		t.Helper()
 
 		value, attr := N(1), alice
-		run := func(b Builder[N], wantF attribute.Set, wantD []attribute.KeyValue) func(*testing.T) {
+		run := func(b Builder[N], ctxWrapper func(context.Context) context.Context, wantF attribute.Set, wantD []attribute.KeyValue) func(*testing.T) {
 			return func(t *testing.T) {
 				t.Helper()
 
@@ -96,14 +99,36 @@ func testBuilderFilter[N int64 | float64]() func(t *testing.T) {
 					assert.Equal(t, wantF, f, "measured incorrect filtered attributes")
 					assert.ElementsMatch(t, wantD, d, "measured incorrect dropped attributes")
 				})
-				meas(t.Context(), value, attr)
+				ctx := t.Context()
+				if ctxWrapper != nil {
+					ctx = ctxWrapper(ctx)
+				}
+				meas(ctx, value, attr)
 			}
 		}
 
-		t.Run("NoFilter", run(Builder[N]{}, attr, nil))
-		t.Run("Filter", run(Builder[N]{Filter: attrFltr}, fltrAlice, []attribute.KeyValue{adminTrue}))
+		t.Run("NoFilter", run(Builder[N]{}, nil, attr, nil))
+		t.Run("Filter", run(Builder[N]{Filter: attrFltr}, nil, fltrAlice, []attribute.KeyValue{adminTrue}))
+
+		ctxAttr := attribute.NewSet(attribute.String("k1", "v1"))
+
+		t.Run("ContextAttrsDefault", run(Builder[N]{}, func(ctx context.Context) context.Context {
+			return contextual.ContextWithAttributes(ctx, ctxAttr)
+		}, attr, []attribute.KeyValue{attribute.String("k1", "v1")}))
+
+		t.Run("ContextAttrsOptIn", run(Builder[N]{}, func(ctx context.Context) context.Context {
+			return contextual.ContextWithAttributes(ctx, ctxAttr, contextual.WithAddToMetrics(true))
+		}, attribute.NewSet(userAlice, adminTrue, attribute.String("k1", "v1")), nil))
+
+		t.Run("ContextAttrsViewOptIn", run(Builder[N]{Filter: func(kv attribute.KeyValue) bool {
+			return kv.Key == "k1" || kv.Key == "user"
+		}}, func(ctx context.Context) context.Context {
+			return contextual.ContextWithAttributes(ctx, ctxAttr)
+		}, attribute.NewSet(userAlice, attribute.String("k1", "v1")), []attribute.KeyValue{adminTrue}))
+
 	}
 }
+
 
 type arg[N int64 | float64] struct {
 	ctx context.Context

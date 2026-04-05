@@ -7,11 +7,13 @@ import (
 	"context"
 	"time"
 
+	"go.opentelemetry.io/otel/contextual"
 	"go.opentelemetry.io/otel/sdk/instrumentation"
 	"go.opentelemetry.io/otel/sdk/trace/internal/observ"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/embedded"
 )
+
 
 type tracer struct {
 	embedded.Tracer
@@ -171,6 +173,12 @@ func (tr *tracer) newRecordingSpan(
 
 	s.SetAttributes(sr.Attributes...)
 	s.SetAttributes(config.Attributes()...)
+
+	ctxAttrs := contextual.AttributesFromContext(ctx)
+	s.SetAttributes(ctxAttrs.All()...)
+
+
+
 
 	if tr.inst.Enabled() {
 		// Propagate any existing values from the context with the new span to

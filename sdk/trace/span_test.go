@@ -5,6 +5,7 @@ package trace
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"testing"
 
@@ -12,8 +13,10 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/contextual"
 	"go.opentelemetry.io/otel/trace"
 )
+
 
 func TestSetStatus(t *testing.T) {
 	tests := []struct {
@@ -438,3 +441,28 @@ func BenchmarkSpanEnd(b *testing.B) {
 		})
 	}
 }
+
+func TestSpanContextAttributes(t *testing.T) {
+	tp := NewTracerProvider()
+	tracer := tp.Tracer("test")
+
+	ctx := context.Background()
+	attrs := attribute.NewSet(attribute.String("k1", "v1"))
+	ctx = contextual.ContextWithAttributes(ctx, attrs)
+
+	_, span := tracer.Start(ctx, "span")
+	defer span.End()
+
+	rSpan, ok := span.(*recordingSpan)
+	assert.True(t, ok)
+
+	found := false
+	for _, kv := range rSpan.Attributes() {
+		if kv.Key == "k1" && kv.Value.AsString() == "v1" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "Attribute k1=v1 not found in span")
+}
+
