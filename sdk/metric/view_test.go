@@ -437,7 +437,68 @@ func TestNewViewReplace(t *testing.T) {
 	})
 }
 
+func TestNewMaskedView(t *testing.T) {
+	alt := "alternative value"
+	tests := []struct {
+		name string
+		mask Stream
+		want Stream
+	}{
+		{
+			name: "Nothing",
+			want: Stream{},
+		},
+		{
+			name: "Name",
+			mask: Stream{Name: alt},
+			want: Stream{Name: alt},
+		},
+		{
+			name: "Description",
+			mask: Stream{Description: alt},
+			want: Stream{Description: alt},
+		},
+		{
+			name: "Unit",
+			mask: Stream{Unit: "1"},
+			want: Stream{Unit: "1"},
+		},
+		{
+			name: "Aggregation",
+			mask: Stream{Aggregation: AggregationLastValue{}},
+			want: Stream{Aggregation: AggregationLastValue{}},
+		},
+		{
+			name: "Complete",
+			mask: Stream{
+				Name:        alt,
+				Description: alt,
+				Unit:        "1",
+				Aggregation: AggregationLastValue{},
+			},
+			want: Stream{
+				Name:        alt,
+				Description: alt,
+				Unit:        "1",
+				Aggregation: AggregationLastValue{},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, match := NewMaskedView(completeIP, test.mask)(completeIP)
+			require.True(t, match, "view did not match exact criteria")
+			assert.Equal(t, test.want, got)
+		})
+	}
+}
+
+
+
+
 type badAgg struct {
+
 	e error
 }
 

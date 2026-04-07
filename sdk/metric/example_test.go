@@ -155,6 +155,11 @@ func ExampleNewView() {
 	// name: request.latency
 	// description: request latency
 	// unit: ms
+
+
+
+
+
 }
 
 func ExampleNewView_wildcard() {
@@ -182,6 +187,10 @@ func ExampleNewView_wildcard() {
 	// Output:
 	// name: computation.time.ms
 	// unit: ms
+
+
+
+
 }
 
 func ExampleNewView_drop() {

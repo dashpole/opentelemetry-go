@@ -43,6 +43,21 @@ type View func(Instrument) (Stream, bool)
 // of the default. If you need to zero out an Stream field returned from a
 // View, create a View directly.
 func NewView(criteria Instrument, mask Stream) View {
+	return newView(criteria, mask, true)
+}
+
+// NewMaskedView returns a View that applies the Stream mask for all instruments that
+// match criteria, without filling in defaults from the matched instrument.
+//
+// The returned View behaves similarly to NewView, but fields of the returned
+// Stream that are not specified in the mask (zero-values) are left as zero-values
+// in the returned Stream. This allows the Stream to be sequentially merged with
+// other Streams in a layered fashion.
+func NewMaskedView(criteria Instrument, mask Stream) View {
+	return newView(criteria, mask, false)
+}
+
+func newView(criteria Instrument, mask Stream, applyDefaults bool) View {
 	if criteria.IsEmpty() {
 		global.Error(
 			errEmptyView, "dropping view",
@@ -95,18 +110,29 @@ func NewView(criteria Instrument, mask Stream) View {
 
 	return func(i Instrument) (Stream, bool) {
 		if matchFunc(i) {
-			return Stream{
-				Name:                              nonZero(mask.Name, i.Name),
-				Description:                       nonZero(mask.Description, i.Description),
-				Unit:                              nonZero(mask.Unit, i.Unit),
+			s := Stream{
 				Aggregation:                       agg,
 				AttributeFilter:                   mask.AttributeFilter,
 				ExemplarReservoirProviderSelector: mask.ExemplarReservoirProviderSelector,
-			}, true
+				Name:                              mask.Name,
+				Description:                       mask.Description,
+				Unit:                              mask.Unit,
+			}
+
+			if applyDefaults {
+				s.Name = nonZero(s.Name, i.Name)
+				s.Description = nonZero(s.Description, i.Description)
+				s.Unit = nonZero(s.Unit, i.Unit)
+			}
+
+			return s, true
 		}
 		return Stream{}, false
 	}
 }
+
+
+
 
 // nonZero returns v if it is non-zero-valued, otherwise alt.
 func nonZero[T comparable](v, alt T) T {

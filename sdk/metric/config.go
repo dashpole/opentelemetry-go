@@ -23,7 +23,9 @@ type config struct {
 	views            []View
 	exemplarFilter   exemplar.Filter
 	cardinalityLimit int
+	layeredViews     bool
 }
+
 
 const defaultCardinalityLimit = 0
 
@@ -150,6 +152,19 @@ func WithView(views ...View) Option {
 		return cfg
 	})
 }
+
+// WithLayeredViews enables sequential merging of views when multiple views
+// match an instrument.
+//
+// When enabled, matching views are applied in order to a base stream, and
+// fields are overridden by non-zero values from subsequent views.
+func WithLayeredViews(enabled bool) Option {
+	return optionFunc(func(cfg config) config {
+		cfg.layeredViews = enabled
+		return cfg
+	})
+}
+
 
 // WithExemplarFilter configures the exemplar filter.
 //

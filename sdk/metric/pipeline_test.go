@@ -44,7 +44,8 @@ func testSumAggregateOutput(
 }
 
 func TestNewPipeline(t *testing.T) {
-	pipe := newPipeline(nil, nil, nil, exemplar.AlwaysOffFilter, 0)
+	pipe := newPipeline(nil, nil, nil, exemplar.AlwaysOffFilter, 0, false)
+
 
 	output := metricdata.ResourceMetrics{}
 	err := pipe.produce(t.Context(), &output)
@@ -70,7 +71,8 @@ func TestNewPipeline(t *testing.T) {
 
 func TestPipelineUsesResource(t *testing.T) {
 	res := resource.NewWithAttributes("noSchema", attribute.String("test", "resource"))
-	pipe := newPipeline(res, nil, nil, exemplar.AlwaysOffFilter, 0)
+	pipe := newPipeline(res, nil, nil, exemplar.AlwaysOffFilter, 0, false)
+
 
 	output := metricdata.ResourceMetrics{}
 	err := pipe.produce(t.Context(), &output)
@@ -79,7 +81,8 @@ func TestPipelineUsesResource(t *testing.T) {
 }
 
 func TestPipelineConcurrentSafe(t *testing.T) {
-	pipe := newPipeline(nil, nil, nil, exemplar.AlwaysOffFilter, 0)
+	pipe := newPipeline(nil, nil, nil, exemplar.AlwaysOffFilter, 0, false)
+
 	ctx := t.Context()
 	var output metricdata.ResourceMetrics
 
@@ -138,13 +141,15 @@ func testDefaultViewImplicit[N int64 | float64]() func(t *testing.T) {
 		}{
 			{
 				name: "NoView",
-				pipe: newPipeline(nil, reader, nil, exemplar.AlwaysOffFilter, 0),
+				pipe: newPipeline(nil, reader, nil, exemplar.AlwaysOffFilter, 0, false),
+
 			},
 			{
 				name: "NoMatchingView",
 				pipe: newPipeline(nil, reader, []View{
 					NewView(Instrument{Name: "foo"}, Stream{Name: "bar"}),
-				}, exemplar.AlwaysOffFilter, 0),
+				}, exemplar.AlwaysOffFilter, 0, false),
+
 			},
 		}
 
@@ -229,7 +234,8 @@ func TestLogConflictName(t *testing.T) {
 			return instID{Name: tc.existing}
 		})
 
-		i := newInserter[int64](newPipeline(nil, nil, nil, exemplar.AlwaysOffFilter, 0), &vc)
+		i := newInserter[int64](newPipeline(nil, nil, nil, exemplar.AlwaysOffFilter, 0, false), &vc)
+
 		i.logConflict(instID{Name: tc.name})
 
 		if tc.conflict {
@@ -271,7 +277,8 @@ func TestLogConflictSuggestView(t *testing.T) {
 	var vc cache[string, instID]
 	name := strings.ToLower(orig.Name)
 	_ = vc.Lookup(name, func() instID { return orig })
-	i := newInserter[int64](newPipeline(nil, nil, nil, exemplar.AlwaysOffFilter, 0), &vc)
+	i := newInserter[int64](newPipeline(nil, nil, nil, exemplar.AlwaysOffFilter, 0, false), &vc)
+
 
 	viewSuggestion := func(inst instID, stream string) string {
 		return `"NewView(Instrument{` +
@@ -376,7 +383,8 @@ func TestInserterCachedAggregatorNameConflict(t *testing.T) {
 	}
 
 	var vc cache[string, instID]
-	pipe := newPipeline(nil, NewManualReader(), nil, exemplar.AlwaysOffFilter, 0)
+	pipe := newPipeline(nil, NewManualReader(), nil, exemplar.AlwaysOffFilter, 0, false)
+
 	i := newInserter[int64](pipe, &vc)
 
 	readerAggregation := i.readerDefaultAggregation(kind)
@@ -609,7 +617,8 @@ func TestPipelineWithMultipleReaders(t *testing.T) {
 func TestPipelineProduceErrors(t *testing.T) {
 	// Create a test pipeline with aggregations
 	pipeReader := NewManualReader()
-	pipe := newPipeline(nil, pipeReader, nil, exemplar.AlwaysOffFilter, 0)
+	pipe := newPipeline(nil, pipeReader, nil, exemplar.AlwaysOffFilter, 0, false)
+
 
 	// Set up an observable with callbacks
 	var testObsID observableID[int64]
@@ -731,3 +740,47 @@ func TestPipelineProduceErrors(t *testing.T) {
 		assert.Equal(t, 3, aggCallCount)
 	})
 }
+
+func TestLayeredViews(t *testing.T) {
+	r := NewManualReader()
+
+	// View 1: Change all histograms to have custom boundaries.
+	v1 := NewMaskedView(
+		Instrument{Kind: InstrumentKindHistogram},
+		Stream{Aggregation: AggregationExplicitBucketHistogram{Boundaries: []float64{10, 20}}},
+	)
+
+	// View 2: Rename a specific histogram.
+	v2 := NewMaskedView(
+		Instrument{Name: "my_histogram"},
+		Stream{Name: "renamed_histogram"},
+	)
+
+
+
+	mp := NewMeterProvider(
+		WithReader(r),
+		WithView(v1, v2),
+		WithLayeredViews(true),
+	)
+
+	meter := mp.Meter("test")
+	h, err := meter.Int64Histogram("my_histogram")
+	require.NoError(t, err)
+
+	h.Record(t.Context(), 15)
+
+	rm := new(metricdata.ResourceMetrics)
+	err = r.Collect(t.Context(), rm)
+	require.NoError(t, err)
+
+	require.Len(t, rm.ScopeMetrics, 1)
+	require.Len(t, rm.ScopeMetrics[0].Metrics, 1)
+
+	m := rm.ScopeMetrics[0].Metrics[0]
+	assert.Equal(t, "renamed_histogram", m.Name, "Instrument was not renamed")
+
+	hist := m.Data.(metricdata.Histogram[int64])
+	assert.Equal(t, []float64{10, 20}, hist.DataPoints[0].Bounds, "Aggregation boundaries were not updated")
+}
+

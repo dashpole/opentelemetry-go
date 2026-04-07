@@ -11,8 +11,10 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/internal/global"
 	"go.opentelemetry.io/otel/metric/embedded"
+
 	"go.opentelemetry.io/otel/sdk/instrumentation"
 	"go.opentelemetry.io/otel/sdk/metric/exemplar"
 	"go.opentelemetry.io/otel/sdk/metric/internal"
@@ -42,6 +44,7 @@ func newPipeline(
 	views []View,
 	exemplarFilter exemplar.Filter,
 	cardinalityLimit int,
+	layeredViews bool,
 ) *pipeline {
 	if res == nil {
 		res = resource.Empty()
@@ -50,6 +53,8 @@ func newPipeline(
 		resource:         res,
 		reader:           reader,
 		views:            views,
+		layeredViews:     layeredViews,
+
 		int64Measures:    map[observableID[int64]][]aggregate.Measure[int64]{},
 		float64Measures:  map[observableID[float64]][]aggregate.Measure[float64]{},
 		exemplarFilter:   exemplarFilter,
@@ -67,10 +72,12 @@ func newPipeline(
 type pipeline struct {
 	resource *resource.Resource
 
-	reader Reader
-	views  []View
+	reader       Reader
+	views        []View
+	layeredViews bool
 
 	sync.Mutex
+
 	int64Measures    map[observableID[int64]][]aggregate.Measure[int64]
 	float64Measures  map[observableID[float64]][]aggregate.Measure[float64]
 	aggregations     map[instrumentation.Scope][]instrumentSync
@@ -244,26 +251,66 @@ func (i *inserter[N]) Instrument(inst Instrument, readerAggregation Aggregation)
 
 	var err error
 	seen := make(map[uint64]struct{})
-	for _, v := range i.pipeline.views {
-		stream, match := v(inst)
-		if !match {
-			continue
+	if i.pipeline.layeredViews {
+		var currentStream Stream
+		var streamSet bool
+		for _, v := range i.pipeline.views {
+			s, match := v(inst)
+			if !match {
+				continue
+			}
+			matched = true
+			if !streamSet {
+				currentStream = s
+				streamSet = true
+			} else {
+				currentStream = mergeStreams(currentStream, s)
+			}
 		}
-		matched = true
-		in, id, e := i.cachedAggregator(inst.Scope, inst.Kind, stream, readerAggregation)
-		if e != nil {
-			err = errors.Join(err, e)
+
+		if matched {
+			// Fill in defaults for fields that are still zero
+			currentStream.Name = nonZero(currentStream.Name, inst.Name)
+			currentStream.Description = nonZero(currentStream.Description, inst.Description)
+			currentStream.Unit = nonZero(currentStream.Unit, inst.Unit)
+
+			in, _, e := i.cachedAggregator(inst.Scope, inst.Kind, currentStream, readerAggregation)
+			if e != nil {
+				err = errors.Join(err, e)
+			}
+			if in != nil {
+				measures = append(measures, in)
+			}
 		}
-		if in == nil { // Drop aggregation.
-			continue
+	} else {
+		for _, v := range i.pipeline.views {
+			stream, match := v(inst)
+			if !match {
+				continue
+			}
+			matched = true
+			stream.Name = nonZero(stream.Name, inst.Name)
+			stream.Description = nonZero(stream.Description, inst.Description)
+			stream.Unit = nonZero(stream.Unit, inst.Unit)
+
+			in, id, e := i.cachedAggregator(inst.Scope, inst.Kind, stream, readerAggregation)
+
+
+			if e != nil {
+				err = errors.Join(err, e)
+			}
+			if in == nil { // Drop aggregation.
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				// This aggregate function has already been added.
+				continue
+			}
+			seen[id] = struct{}{}
+			measures = append(measures, in)
 		}
-		if _, ok := seen[id]; ok {
-			// This aggregate function has already been added.
-			continue
-		}
-		seen[id] = struct{}{}
-		measures = append(measures, in)
 	}
+
 
 	if err != nil {
 		err = errors.Join(errCreatingAggregators, err)
@@ -292,6 +339,32 @@ func (i *inserter[N]) Instrument(inst Instrument, readerAggregation Aggregation)
 	}
 	return measures, err
 }
+func mergeStreams(base, override Stream) Stream {
+	return Stream{
+		Name:        nonZero(override.Name, base.Name),
+		Description: nonZero(override.Description, base.Description),
+		Unit:        nonZero(override.Unit, base.Unit),
+		Aggregation: func() Aggregation {
+			if override.Aggregation != nil {
+				return override.Aggregation
+			}
+			return base.Aggregation
+		}(),
+		AttributeFilter: func() attribute.Filter {
+			if override.AttributeFilter != nil {
+				return override.AttributeFilter
+			}
+			return base.AttributeFilter
+		}(),
+		ExemplarReservoirProviderSelector: func() ExemplarReservoirProviderSelector {
+			if override.ExemplarReservoirProviderSelector != nil {
+				return override.ExemplarReservoirProviderSelector
+			}
+			return base.ExemplarReservoirProviderSelector
+		}(),
+	}
+}
+
 
 // addCallback registers a single instrument callback to be run when
 // `produce()` is called.
@@ -622,15 +695,17 @@ func newPipelines(
 	views []View,
 	exemplarFilter exemplar.Filter,
 	cardinalityLimit int,
+	layeredViews bool,
 ) pipelines {
 	pipes := make([]*pipeline, 0, len(readers))
 	for _, r := range readers {
-		p := newPipeline(res, r, views, exemplarFilter, cardinalityLimit)
+		p := newPipeline(res, r, views, exemplarFilter, cardinalityLimit, layeredViews)
 		r.register(p)
 		pipes = append(pipes, p)
 	}
 	return pipes
 }
+
 
 type unregisterFuncs struct {
 	embedded.Registration
