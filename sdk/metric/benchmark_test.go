@@ -15,6 +15,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/x"
 	"go.opentelemetry.io/otel/sdk/metric/exemplar"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/trace"
@@ -629,6 +630,12 @@ func BenchmarkEndToEndCounterAdd(b *testing.B) {
 					b.Run("Dynamic/WithAttributeSet", func(b *testing.B) {
 						counter := testCounter(b, mp.provider())
 						b.ReportAllocs()
+						optionPool := sync.Pool{
+							New: func() any {
+								return metric.WithAttributeSet(*attribute.EmptySet())
+							},
+						}
+
 						b.RunParallel(func(pb *testing.PB) {
 							for pb.Next() {
 								// Wrap in a function so we can use defer.
@@ -639,13 +646,20 @@ func BenchmarkEndToEndCounterAdd(b *testing.B) {
 										attrPool.Put(attrsSlice)
 									}()
 									*attrsSlice = appendAttributes(*attrsSlice, attrsLen)
+									set := attribute.NewSet(*attrsSlice...)
+
+									opt := optionPool.Get().(metric.MeasurementOption)
+									defer optionPool.Put(opt)
+
+									if r, ok := opt.(x.Resettable[attribute.Set]); ok {
+										r.Reset(set)
+									}
 									addOpt := addOptPool.Get().(*[]metric.AddOption)
 									defer func() {
 										*addOpt = (*addOpt)[:0]
 										addOptPool.Put(addOpt)
 									}()
-									set := attribute.NewSet(*attrsSlice...)
-									*addOpt = append(*addOpt, metric.WithAttributeSet(set))
+									*addOpt = append(*addOpt, opt)
 									counter.Add(ctx, 1, *addOpt...)
 								}()
 							}
