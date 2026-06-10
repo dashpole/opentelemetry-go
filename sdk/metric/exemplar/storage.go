@@ -80,14 +80,24 @@ func (m *measurement) exemplar(dest *Exemplar) bool {
 	sc := m.SpanContext
 	if sc.HasTraceID() {
 		traceID := sc.TraceID()
-		dest.TraceID = traceID[:]
+		if cap(dest.TraceID) >= 16 {
+			dest.TraceID = dest.TraceID[:16]
+		} else {
+			dest.TraceID = make([]byte, 16)
+		}
+		copy(dest.TraceID, traceID[:])
 	} else {
 		dest.TraceID = dest.TraceID[:0]
 	}
 
 	if sc.HasSpanID() {
 		spanID := sc.SpanID()
-		dest.SpanID = spanID[:]
+		if cap(dest.SpanID) >= 8 {
+			dest.SpanID = dest.SpanID[:8]
+		} else {
+			dest.SpanID = make([]byte, 8)
+		}
+		copy(dest.SpanID, spanID[:])
 	} else {
 		dest.SpanID = dest.SpanID[:0]
 	}

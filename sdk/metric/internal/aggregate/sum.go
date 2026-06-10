@@ -167,7 +167,8 @@ func (s *cumulativeSum[N]) collect(
 
 	// Values are being concurrently written while we iterate, so only use the
 	// current length for capacity.
-	dPts := reset(sData.DataPoints, 0, s.values.Len())
+	n := s.values.Len()
+	dPts := reset(sData.DataPoints, n, n)
 
 	perSeriesStartTimeEnabled := x.PerSeriesStartTimestamps.Enabled()
 
@@ -179,14 +180,15 @@ func (s *cumulativeSum[N]) collect(
 		if perSeriesStartTimeEnabled {
 			startTime = val.startTime
 		}
-		newPt := metricdata.DataPoint[N]{
-			Attributes: val.attrs,
-			StartTime:  startTime,
-			Time:       t,
-			Value:      val.n.load(),
+		if i >= len(dPts) {
+			dPts = append(dPts, metricdata.DataPoint[N]{})
 		}
-		collectExemplars(&newPt.Exemplars, val.res.Collect)
-		dPts = append(dPts, newPt)
+		dPts[i].Attributes = val.attrs
+		dPts[i].StartTime = startTime
+		dPts[i].Time = t
+		dPts[i].Value = val.n.load()
+
+		collectExemplars(&dPts[i].Exemplars, val.res.Collect)
 		// TODO (#3006): This will use an unbounded amount of memory if there
 		// are unbounded number of attribute sets being aggregated. Attribute
 		// sets that become "stale" need to be forgotten so this will not

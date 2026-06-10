@@ -17,7 +17,11 @@ var exemplarPool = sync.Pool{
 func collectExemplars[N int64 | float64](out *[]metricdata.Exemplar[N], f func(*[]exemplar.Exemplar)) {
 	dest := exemplarPool.Get().(*[]exemplar.Exemplar)
 	defer func() {
-		clear(*dest) // Erase elements to let GC collect objects.
+		for i := range *dest {
+			(*dest)[i].FilteredAttributes = nil
+			(*dest)[i].TraceID = (*dest)[i].TraceID[:0]
+			(*dest)[i].SpanID = (*dest)[i].SpanID[:0]
+		}
 		*dest = (*dest)[:0]
 		exemplarPool.Put(dest)
 	}()
@@ -26,12 +30,24 @@ func collectExemplars[N int64 | float64](out *[]metricdata.Exemplar[N], f func(*
 
 	f(dest)
 
-	*out = reset(*out, len(*dest), cap(*dest))
+	*out = reset(*out, len(*dest), len(*dest))
 	for i, e := range *dest {
 		(*out)[i].FilteredAttributes = e.FilteredAttributes
 		(*out)[i].Time = e.Time
-		(*out)[i].SpanID = e.SpanID
-		(*out)[i].TraceID = e.TraceID
+
+		if cap((*out)[i].TraceID) >= len(e.TraceID) {
+			(*out)[i].TraceID = (*out)[i].TraceID[:len(e.TraceID)]
+		} else {
+			(*out)[i].TraceID = make([]byte, len(e.TraceID))
+		}
+		copy((*out)[i].TraceID, e.TraceID)
+
+		if cap((*out)[i].SpanID) >= len(e.SpanID) {
+			(*out)[i].SpanID = (*out)[i].SpanID[:len(e.SpanID)]
+		} else {
+			(*out)[i].SpanID = make([]byte, len(e.SpanID))
+		}
+		copy((*out)[i].SpanID, e.SpanID)
 
 		switch e.Value.Type() {
 		case exemplar.Int64ValueType:
