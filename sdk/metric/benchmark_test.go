@@ -515,6 +515,30 @@ func BenchmarkExemplars(b *testing.B) {
 			assert.Len(b, *e, 1)
 		}
 	})
+
+	name = fmt.Sprintf("Int64HistogramNoReuse/%d", nCPU)
+	b.Run(name, func(b *testing.B) {
+		m, r := setup("Int64Counter")
+		i, err := m.Int64Histogram("int64-histogram")
+		assert.NoError(b, err)
+
+		b.ReportAllocs()
+		b.ResetTimer()
+		for n := 0; n < b.N; n++ {
+			for j := 0; j < 2*nCPU; j++ {
+				i.Record(ctx, 1, metric.WithAttributeSet(attr))
+			}
+
+			rm := newRM(metricdata.Histogram[int64]{
+				DataPoints: []metricdata.HistogramDataPoint[int64]{
+					{Exemplars: make([]metricdata.Exemplar[int64], 0, 1)},
+				},
+			})
+			_ = r.Collect(ctx, rm)
+			e := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Histogram[int64]).DataPoints[0].Exemplars
+			assert.Len(b, e, 1)
+		}
+	})
 }
 
 func newRM(a metricdata.Aggregation) *metricdata.ResourceMetrics {
