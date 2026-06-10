@@ -26,7 +26,7 @@ func collectExemplars[N int64 | float64](out *[]metricdata.Exemplar[N], f func(*
 
 	f(dest)
 
-	*out = reset(*out, len(*dest), cap(*dest))
+	*out = reset(*out, len(*dest), len(*dest))
 	for i, e := range *dest {
 		(*out)[i].FilteredAttributes = e.FilteredAttributes
 		(*out)[i].Time = e.Time
