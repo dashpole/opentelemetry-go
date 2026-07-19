@@ -14,7 +14,7 @@ or post it anywhere yourself.**
 ## Procedure
 
 1. **Find the spec surface.** Search the OpenTelemetry specification
-   (https://github.com/open-telemetry/opentelemetry-specification,
+   (<https://github.com/open-telemetry/opentelemetry-specification>,
    `specification/` tree, latest release tag unless told otherwise) for the
    sections governing this task. Quote every normative sentence
    (MUST/SHOULD/MAY) that applies, with pinned links. If the task has no

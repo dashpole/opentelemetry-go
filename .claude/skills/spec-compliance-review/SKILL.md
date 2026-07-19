@@ -29,7 +29,7 @@ reviews unless the maintainer explicitly asks.
 1. **Collect requirements.** Read the linked issue's "Specification
    references" section — those anchors are the primary requirement set. If
    the issue has none, locate the relevant sections yourself in
-   https://github.com/open-telemetry/opentelemetry-specification (search
+   <https://github.com/open-telemetry/opentelemetry-specification> (search
    `specification/` for the feature; use the spec version pinned by the
    issue, or the latest release tag). Extract every MUST / MUST NOT /
    SHOULD / MAY sentence that the changed code could affect, including

@@ -1,3 +1,7 @@
+<!-- Template bodies use section headings; an h1 would render as a title
+inside every PR description. -->
+<!-- markdownlint-disable MD041 -->
+
 <!--
 Keep it factual and short. Reviewers check evidence, not prose: a PR that
 shows its work gets reviewed faster. PRs whose review cost exceeds the
@@ -28,7 +32,7 @@ no spec surface. -->
 Do not paste generated summaries of the diff; the diff speaks for itself. -->
 
 ```console
-$ make precommit
+make precommit
 ```
 
 ## Out of scope

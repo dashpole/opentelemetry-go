@@ -4,6 +4,10 @@ about: A fully specified implementation task, ready for a contributor (human or 
 labels: needs-design
 ---
 
+<!-- Template bodies use section headings; an h1 would render as a title
+inside every filed issue. -->
+<!-- markdownlint-disable MD041 -->
+
 <!--
 MAINTAINER GUIDE (delete this comment before submitting)
 
