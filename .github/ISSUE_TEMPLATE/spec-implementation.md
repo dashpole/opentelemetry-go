@@ -111,6 +111,7 @@ including error and concurrent paths where relevant.
 - [ ] New/changed tests pass with `-race`
 - [ ] `CHANGELOG.md` entry under `## [Unreleased]` (module reference and PR
       number, per the changelog conventions in `AGENTS.md`)
+
 <!-- For performance-sensitive paths, also require:
 - [ ] `benchstat` comparison against the base branch included in the PR
 -->
