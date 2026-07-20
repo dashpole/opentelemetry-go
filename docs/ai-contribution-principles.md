@@ -125,6 +125,37 @@ maintainer*, who decides what reaches the PR. Pilot any review automation on
 a couple dozen PRs and tune before it is allowed to speak publicly, and
 never run it with write access to secrets on fork PRs.
 
+### 10. Agent-friendliness must not tax humans
+
+Most of what helps agents — specified issues, small scope, explicit
+non-goals, executable definitions of done — helps human contributors
+unconditionally, because a new human is in the same position as an agent: no
+context, gaps filled with guesses. The part that can hurt humans is
+ceremony: templates, checklists, and gates that agents fill happily but
+humans experience as bureaucracy. So put a budget on ceremony and spend the
+length elsewhere:
+
+- **Agent-facing content may be long; human-facing surfaces must be short.**
+  Detail belongs in `AGENTS.md`, skills, and linked docs — files a human
+  never has to scroll past. Anything a human must physically move through
+  (templates, checklists) stays minimal.
+- **Templates are defaults, not contracts.** Sections that don't apply may
+  be deleted, and reviewers never bounce a PR for template noncompliance
+  when the substance is present. A ritually enforced form breeds ritual
+  compliance — boxes checked without meaning, then ignored by reviewers,
+  costing everyone and informing no one.
+- **Every checklist item that could be a CI check is a bug in the
+  checklist.** A checkbox taxes every contributor forever; a CI check has
+  zero marginal human cost and never rots. This is the enforcement ladder
+  (principle 6) argued from the human side.
+- **Gates key on change risk, never on tooling** (principle 7) — risk-keyed
+  gates feel fair; tool-keyed gates feel insulting and are unenforceable.
+- **Watch the drop-off signals.** Friction is invisible from the
+  maintainer's seat. Declining drive-by contributions (docs fixes, small
+  cleanups), template sections deleted wholesale or filled with "n/a"
+  noise, and rising time-to-first-contribution all say the balance has
+  tipped — loosen the forms, not the specifications.
+
 ## The deterministic floor (roadmap)
 
 The ladder's first rung, in adoption order. Some of it already exists here —

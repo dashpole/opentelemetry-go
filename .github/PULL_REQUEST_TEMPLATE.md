@@ -7,6 +7,9 @@ Keep it factual and short. Reviewers check evidence, not prose: a PR that
 shows its work gets reviewed faster. PRs whose review cost exceeds the
 effort evidently invested in them may be closed — see
 docs/ai-contribution-principles.md.
+
+This template is a default, not a contract: delete any section that does
+not apply to your change (a docs fix needs none of it).
 -->
 
 ## What & why
@@ -43,6 +46,8 @@ make precommit
 
 - [ ] `make precommit` passes locally
 - [ ] Tests assert the issue's acceptance criteria (not implementation details)
-- [ ] `CHANGELOG.md` updated under `## [Unreleased]` with module reference and
-      PR number (or change is not user-visible)
 - [ ] No new exported identifiers beyond the issue's approved API design
+
+<!-- No changelog checkbox: CI enforces the CHANGELOG.md entry (see the
+changelog workflow). A checklist item a machine can verify is a bug in the
+checklist — docs/ai-contribution-principles.md, principle 10. -->
