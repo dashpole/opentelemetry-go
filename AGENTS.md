@@ -19,6 +19,23 @@ Treat `.github/copilot-instructions.md` as global passive guidance for every tas
 - Be conservative on hot paths. Avoid unnecessary allocations, reflection, interface churn, blocking, global state, and high-cardinality telemetry.
 - Write comments only for intent, invariants, and non-obvious constraints. Do not add comments that restate the code.
 
+## Working from issues
+
+- Prefer working from an issue labeled `ready-to-implement`. Its
+  **Specification references** and acceptance criteria are the requirements;
+  quoted spec sections take precedence over your own reading of what the
+  feature should do.
+- If an issue is labeled `needs-design`, or adds public API without a
+  maintainer-approved API sketch in the issue, do not open an implementation
+  PR. Propose signatures on the issue instead — new exported API requires
+  design sign-off before code.
+- Keep the change the size the issue describes. If the fix requires touching
+  packages the issue does not list, stop and say so on the issue rather than
+  expanding the diff.
+- PRs must include the evidence the PR template asks for: spec sections
+  implemented (quoted), test output, and a `benchstat` comparison for any
+  performance claim.
+
 ## Default workflow
 
 For new features and behavior changes, use this order unless the task explicitly says otherwise:

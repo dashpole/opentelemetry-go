@@ -1,0 +1,53 @@
+<!-- Template bodies use section headings; an h1 would render as a title
+inside every PR description. -->
+<!-- markdownlint-disable MD041 -->
+
+<!--
+Keep it factual and short. Reviewers check evidence, not prose: a PR that
+shows its work gets reviewed faster. PRs whose review cost exceeds the
+effort evidently invested in them may be closed — see
+docs/ai-contribution-principles.md.
+
+This template is a default, not a contract: delete any section that does
+not apply to your change (a docs fix needs none of it).
+-->
+
+## What & why
+
+<!-- One or two sentences. Link the issue this implements: Fixes #NNN.
+If there is no ready-to-implement issue for this change and it touches
+public API, open one first — API changes without an approved design are
+not reviewed. -->
+
+Fixes #
+
+## Specification references
+
+<!-- Quote the normative spec sentence(s) this change implements, with
+pinned links — usually copied from the issue. Write "n/a" for changes with
+no spec surface. -->
+
+## Evidence
+
+<!-- Show, don't tell. Paste the commands you ran and their relevant output:
+- test run for the new/changed behavior (with -race where applicable)
+- for performance claims or hot-path changes: benchstat old vs. new
+Do not paste generated summaries of the diff; the diff speaks for itself. -->
+
+```console
+make precommit
+```
+
+## Out of scope
+
+<!-- What you intentionally did NOT do, and where that work is tracked. -->
+
+## Checklist
+
+- [ ] `make precommit` passes locally
+- [ ] Tests assert the issue's acceptance criteria (not implementation details)
+- [ ] No new exported identifiers beyond the issue's approved API design
+
+<!-- No changelog checkbox: CI enforces the CHANGELOG.md entry (see the
+changelog workflow). A checklist item a machine can verify is a bug in the
+checklist — docs/ai-contribution-principles.md, principle 10. -->
