@@ -13,10 +13,18 @@ time concentrates where human judgment is irreplaceable.
 These principles are written for opentelemetry-go but are intended to
 generalize across OpenTelemetry SIGs. Concrete artifacts implementing them in
 this repository: the "Working from issues" section of `AGENTS.md`, the
-`spec-implementation` issue template, the PR template, and the review skills
-under `.claude/skills/` — building on the agent guidance
+`spec-implementation` issue template, the PR template, and the skills under
+`.agents/skills/` — building on the agent guidance
 (`AGENTS.md`, `.github/copilot-instructions.md`) and conventions
 (`CONTRIBUTING.md`, `VERSIONING.md`) the repository already has.
+
+The skills use the [Agent Skills](https://github.com/agentskills/agentskills)
+open format (a directory containing a `SKILL.md` with YAML front matter),
+which is read by multiple coding agents, not just one vendor's. Canonical
+copies live in the vendor-neutral `.agents/skills/` directory (the
+project-level location the format's ecosystem converged on, alongside
+`AGENTS.md`); `.claude/skills/` holds relative symlinks for tools that only
+discover their vendor-specific path.
 
 ## The principles
 
