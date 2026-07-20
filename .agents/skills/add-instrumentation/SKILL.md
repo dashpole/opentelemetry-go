@@ -16,22 +16,24 @@ Two modes share the ground rules below:
 Decide the mode first; it changes the package layout and gating, not the
 telemetry discipline.
 
+**The godocs are canonical for API facts.** This skill cites them and adds
+only what has no godoc home: repo-internal procedure, and spec-level rules
+the API docs do not yet state. If this skill and a doc comment disagree,
+the doc comment wins — and if you rely on an API fact stated only here,
+treat that as a godoc gap worth fixing upstream.
+
 ## Ground rules (both modes)
 
 - **API, never SDK.** Instrumented code imports `go.opentelemetry.io/otel`
   and the `trace`/`metric` API packages only. It never constructs providers,
   never installs globals, and never depends on `go.opentelemetry.io/otel/sdk`
   outside its tests.
-- **Providers come from the caller.** Accept a `TracerProvider` /
-  `MeterProvider` through the component's existing option pattern and
-  default to the globals (`otel.GetTracerProvider()`,
-  `otel.GetMeterProvider()`). Resolve the default at construction time, not
-  import time, so `SetTracerProvider` ordering does not matter.
-- **Scope identifies the instrumentation.** The tracer/meter name is the
-  instrumentation package's full import path, with
-  `WithInstrumentationVersion` and `WithSchemaURL` set. See the constants
-  block in
-  `exporters/stdout/stdouttrace/internal/observ/instrumentation.go`.
+- **Providers, scope name, and version: follow the package docs.** The
+  canonical pattern — accept a `TracerProvider`/`MeterProvider`, default to
+  the global at construction time, name the tracer/meter by the
+  instrumentation package's import path with `WithInstrumentationVersion` —
+  is written out with code in `trace/doc.go` and `metric/doc.go`. Also set
+  `WithSchemaURL` to the semconv version in use.
 - **Semantic conventions, pinned.** Use one `semconv` version per component
   (the newest vendored under `semconv/`), and take attribute keys and
   instrument definitions from it. Never hand-write a name or unit that
@@ -41,9 +43,10 @@ telemetry discipline.
   `errors.Join` and reported (returned, or `otel.Handle`); the instrumented
   operation proceeds regardless. A nil or noop provider must be a safe
   no-op.
-- **Bound cardinality.** Attribute values must come from a small known set.
-  Record `semconv.ErrorType(err)` — never the error message — and never put
-  user-controlled input (URLs, queries, IDs) into attribute values.
+- **Bound cardinality** (spec rule, not yet in the API godocs). Attribute
+  values must come from a small known set. Record `semconv.ErrorType(err)`
+  — never the error message — and never put user-controlled input (URLs,
+  queries, IDs) into attribute values.
 - **Near-zero cost when disabled.** Gate expensive work: check
   `span.IsRecording()` before computing span attributes and
   `instrument.Enabled(ctx)` before building measurement options. Pre-compute
@@ -54,15 +57,17 @@ telemetry discipline.
 ## Mode A — instrumenting a library
 
 - **Spans**: name spans with low-cardinality templates (an operation name,
-  not a URL or key). Start with the context you were given and pass the
-  returned context down. `defer span.End()` on the same goroutine. On
-  failure call both `span.RecordError(err)` and
-  `span.SetStatus(codes.Error, ...)` — recording alone does not set status.
-- **Metrics**: durations are `Float64Histogram` in seconds (unit `s`);
-  counts are monotonic `Int64Counter`; in-flight work is an
-  `Int64UpDownCounter`. Units are UCUM; instrument names follow semconv
-  naming rules (dot-separated, no plural nouns like `requests.count` —
-  `requests` or `request.duration`).
+  not a URL or key; spec rule, not yet in the godocs). On failure call both
+  `RecordError` and `SetStatus` — per `RecordError`'s own doc comment, it
+  records an exception event and does not change the span status. The
+  lifecycle basics (start from the caller's context, pass the returned
+  context down, `defer span.End()`) are shown in `trace/doc.go`.
+- **Metrics**: pick the instrument by following the compiled examples in
+  `metric/example_test.go` (one per instrument type). Units are UCUM codes
+  (see `metric.WithUnit`). Spec conventions the godocs do not yet state:
+  durations are `Float64Histogram` in seconds (unit `s`), and instrument
+  names are dot-separated with no plural nouns — `requests` or
+  `request.duration`, never `requests.count`.
 - **Propagation**: extract/inject only at process boundaries the library
   actually owns (an HTTP client/server, a queue producer/consumer), using
   the caller-supplied or global `TextMapPropagator`. Pure in-process
