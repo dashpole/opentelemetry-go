@@ -89,30 +89,36 @@ func (h *Hasher) initZero() {
 // is called as described above, it returns the same value as [Set.Equivalent].
 func (h *Hasher) Distinct() Distinct {
 	if h.count == 0 {
-		return emptySet.Equivalent()
+		return Distinct{hash: emptyHash}
 	}
-	sum := h.h.Sum64()
-	// Remap 0 to a non-zero value for non-empty input because hash == 0 is a reserved sentinel (treated as empty/invalid).
-	const remappedZeroHash uint64 = 1
+	return Distinct{hash: remapZeroHash(h.h.Sum64())}
+}
+
+// remapZeroHash remaps a 0 sum for non-empty input to a non-zero value,
+// because hash == 0 is a reserved sentinel (treated as empty/invalid).
+func remapZeroHash(sum uint64) uint64 {
 	if sum == 0 {
-		sum = remappedZeroHash
+		return 1
 	}
-	return Distinct{hash: sum}
+	return sum
 }
 
 // hashKVs returns a new xxHash64 hash of kvs.
+//
+// This routes through [Hasher] so that Set hashing and Hasher cannot disagree:
+// there is exactly one implementation of how attributes are mixed and how the
+// final sum is framed.
 func hashKVs(kvs []KeyValue) uint64 {
-	h := xxhash.New()
+	h := NewHasher()
 	for _, kv := range kvs {
-		h = hashKV(h, kv)
+		// Equivalent to h.Write(kv), minus the zero-value check that a Hasher
+		// from NewHasher never needs. Everything that determines the resulting
+		// value -- initialization, per-attribute mixing, and the final framing
+		// in Distinct -- is shared with Hasher.
+		_ = hashKV(h.h, kv)
 	}
-	sum := h.Sum64()
-	// Remap 0 to a non-zero value for non-empty input because hash == 0 is a reserved sentinel (treated as empty/invalid).
-	const remappedZeroHash uint64 = 1
-	if sum == 0 && len(kvs) > 0 {
-		return remappedZeroHash
-	}
-	return sum
+	h.count = len(kvs)
+	return h.Distinct().hash
 }
 
 // hashKV returns the xxHash64 hash of kv with h as the base.

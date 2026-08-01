@@ -243,6 +243,50 @@ func TestHashValueMapOrdering(t *testing.T) {
 	}
 }
 
+// TestHasherMatchesSetEquivalent pins the invariant that a Hasher written in
+// ascending key order produces the same Distinct as the equivalent Set. Hasher
+// and Set hashing share their initialization, per-attribute mixing, and final
+// framing, so this holds structurally today. The test guards against a future
+// change that splits those paths apart.
+func TestHasherMatchesSetEquivalent(t *testing.T) {
+	t.Run("Empty", func(t *testing.T) {
+		h := NewHasher()
+		set := NewSet()
+		if got, want := h.Distinct(), set.Equivalent(); got != want {
+			t.Errorf("Hasher.Distinct() = %v, NewSet().Equivalent() = %v", got, want)
+		}
+	})
+
+	for _, gen := range keyVals {
+		t.Run(gen.name, func(t *testing.T) {
+			kv := gen.kv("k")
+			h := NewHasher()
+			h.Write(kv)
+			set := NewSet(kv)
+			if got, want := h.Distinct(), set.Equivalent(); got != want {
+				t.Errorf("Hasher.Distinct() = %v, NewSet(%v).Equivalent() = %v", got, kv, want)
+			}
+		})
+	}
+
+	t.Run("All", func(t *testing.T) {
+		// Distinct keys in ascending order, which is the precondition Write
+		// documents and the order NewSet sorts into.
+		attrs := make([]KeyValue, len(keyVals))
+		for i, gen := range keyVals {
+			attrs[i] = gen.kv(fmt.Sprintf("k%03d", i))
+		}
+		h := NewHasher()
+		for _, kv := range attrs {
+			h.Write(kv)
+		}
+		set := NewSet(attrs...)
+		if got, want := h.Distinct(), set.Equivalent(); got != want {
+			t.Errorf("Hasher.Distinct() = %v, NewSet(...).Equivalent() = %v", got, want)
+		}
+	})
+}
+
 func TestHasherZeroValue(t *testing.T) {
 	var zero Hasher
 	if got, want := zero.Distinct(), emptySet.Equivalent(); got != want {
