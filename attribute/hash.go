@@ -5,7 +5,9 @@ package attribute
 
 import (
 	"fmt"
+	"iter"
 	"reflect"
+	"slices"
 
 	"go.opentelemetry.io/otel/attribute/internal/xxhash"
 )
@@ -33,49 +35,27 @@ const (
 	emptyID        uint64 = 7305809155345288421 // "__empty_" (little endian)
 )
 
-// Hasher computes a Distinct value from KeyValue attributes supplied with
-// Write.
+// NewDistinct returns the Distinct identifying the attributes yielded by seq.
 //
-// A Hasher must be obtained from [NewHasher]. The zero value is not usable and
-// its methods will panic.
-type Hasher struct {
-	h xxhash.Hash
-}
-
-// NewHasher returns a new Hasher.
-func NewHasher() *Hasher {
-	return &Hasher{h: xxhash.New()}
-}
-
-// Reset resets h to its initial state so it can be reused.
-func (h *Hasher) Reset() {
-	h.h.Reset()
-}
-
-// Write adds kv to the hash.
+// seq must yield attributes in ascending key order with no duplicate keys. To
+// produce the same Distinct as Set.Equivalent, yield attributes in ascending
+// key order, with no more than one value for each key. If the source contains
+// duplicate keys, retain the last value for each key before yielding.
 //
-// Write requires attributes to be supplied in ascending key order with no
-// duplicate keys. To produce the same Distinct as Set.Equivalent, write
-// attributes in ascending key order, with no more than one value for each key.
-// If the source contains duplicate keys, retain the last value for each key
-// before calling Write.
-func (h *Hasher) Write(kv KeyValue) {
-	// hashKV mutates the digest h.h refers to in place and returns the same
-	// Hash value it was passed. Discarding the result keeps the digest pointer
-	// from flowing back into h, which would force the digest to be heap
-	// allocated for every Hasher. Keeping Write this small also keeps it within
-	// the inlining budget, which matters because hashKVs calls it per attribute.
-	_ = hashKV(h.h, kv)
-}
-
-// Distinct returns the identifier for the attributes written to h. When Write
-// is called as described above, it returns the same value as [Set.Equivalent].
-func (h *Hasher) Distinct() Distinct {
-	// No count of written attributes is needed to detect the empty case. The
-	// sum of a digest with nothing written to it is emptyHash, which is
-	// non-zero (0xef46db3751d8e999), so it passes through remapZeroHash
-	// unchanged and matches emptySet.Equivalent.
-	return Distinct{hash: remapZeroHash(h.h.Sum64())}
+// The hash state lives entirely within this call, so callers cannot observe or
+// misuse a partially built hash, and there is no value to copy or reset.
+func NewDistinct(seq iter.Seq[KeyValue]) Distinct {
+	h := xxhash.New()
+	for kv := range seq {
+		// Do not reassign h: hashKV mutates the digest in place and returns the
+		// same Hash. Reassigning would make the yield closure capture h by
+		// reference and force it to the heap.
+		_ = hashKV(h, kv)
+	}
+	// The sum of a digest with nothing written to it is emptyHash
+	// (0xef46db3751d8e999), which is non-zero, so an empty seq passes through
+	// remapZeroHash unchanged and matches emptySet.Equivalent.
+	return Distinct{hash: remapZeroHash(h.Sum64())}
 }
 
 // remapZeroHash remaps a 0 sum to a non-zero value, because hash == 0 is a
@@ -89,15 +69,11 @@ func remapZeroHash(sum uint64) uint64 {
 
 // hashKVs returns a new xxHash64 hash of kvs.
 //
-// This routes through [Hasher] so that Set hashing and Hasher cannot disagree:
-// there is exactly one implementation of how attributes are mixed and how the
-// final sum is framed.
+// This routes through [NewDistinct] so that Set hashing and NewDistinct cannot
+// disagree: there is exactly one implementation of how attributes are mixed and
+// how the final sum is framed.
 func hashKVs(kvs []KeyValue) uint64 {
-	h := NewHasher()
-	for _, kv := range kvs {
-		h.Write(kv)
-	}
-	return h.Distinct().hash
+	return NewDistinct(slices.Values(kvs)).hash
 }
 
 // hashKV returns the xxHash64 hash of kv with h as the base.

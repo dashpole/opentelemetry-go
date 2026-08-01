@@ -243,65 +243,63 @@ func TestHashValueMapOrdering(t *testing.T) {
 	}
 }
 
-// TestHasherMatchesSetEquivalent pins the invariant that a Hasher written in
-// ascending key order produces the same Distinct as the equivalent Set. Hasher
-// and Set hashing share their initialization, per-attribute mixing, and final
-// framing, so this holds structurally today. The test guards against a future
-// change that splits those paths apart.
-func TestHasherMatchesSetEquivalent(t *testing.T) {
+// TestNewDistinctMatchesSetEquivalent pins the invariant that NewDistinct over
+// attributes in ascending key order produces the same Distinct as the
+// equivalent Set. Set hashing routes through NewDistinct, so this holds
+// structurally today. The test guards against a future change that splits
+// those paths apart.
+func TestNewDistinctMatchesSetEquivalent(t *testing.T) {
 	t.Run("Empty", func(t *testing.T) {
-		h := NewHasher()
 		set := NewSet()
-		if got, want := h.Distinct(), set.Equivalent(); got != want {
-			t.Errorf("Hasher.Distinct() = %v, NewSet().Equivalent() = %v", got, want)
+		got := NewDistinct(slices.Values([]KeyValue(nil)))
+		if want := set.Equivalent(); got != want {
+			t.Errorf("NewDistinct(empty) = %v, NewSet().Equivalent() = %v", got, want)
 		}
 	})
 
 	for _, gen := range keyVals {
 		t.Run(gen.name, func(t *testing.T) {
 			kv := gen.kv("k")
-			h := NewHasher()
-			h.Write(kv)
 			set := NewSet(kv)
-			if got, want := h.Distinct(), set.Equivalent(); got != want {
-				t.Errorf("Hasher.Distinct() = %v, NewSet(%v).Equivalent() = %v", got, kv, want)
+			got := NewDistinct(slices.Values([]KeyValue{kv}))
+			if want := set.Equivalent(); got != want {
+				t.Errorf("NewDistinct(%v) = %v, NewSet(...).Equivalent() = %v", kv, got, want)
 			}
 		})
 	}
 
 	t.Run("All", func(t *testing.T) {
-		// Distinct keys in ascending order, which is the precondition Write
-		// documents and the order NewSet sorts into.
 		attrs := make([]KeyValue, len(keyVals))
 		for i, gen := range keyVals {
 			attrs[i] = gen.kv(fmt.Sprintf("k%03d", i))
 		}
-		h := NewHasher()
-		for _, kv := range attrs {
-			h.Write(kv)
-		}
 		set := NewSet(attrs...)
-		if got, want := h.Distinct(), set.Equivalent(); got != want {
-			t.Errorf("Hasher.Distinct() = %v, NewSet(...).Equivalent() = %v", got, want)
+		got := NewDistinct(slices.Values(attrs))
+		if want := set.Equivalent(); got != want {
+			t.Errorf("NewDistinct(all) = %v, NewSet(...).Equivalent() = %v", got, want)
 		}
 	})
 }
 
-func TestHasherReset(t *testing.T) {
-	h := NewHasher()
-	h.Write(String("a", "1"))
-	h.Write(String("b", "2"))
-	distinctBefore := h.Distinct()
-
-	h.Reset()
-	if got, want := h.Distinct(), emptySet.Equivalent(); got != want {
-		t.Errorf("h.Distinct() after Reset = %v, want %v", got, want)
+// TestNewDistinctEarlyStop verifies NewDistinct consumes the whole sequence and
+// does not stop early, which would silently hash a prefix.
+func TestNewDistinctEarlyStop(t *testing.T) {
+	attrs := []KeyValue{String("a", "1"), String("b", "2"), String("c", "3")}
+	yielded := 0
+	got := NewDistinct(func(yield func(KeyValue) bool) {
+		for _, kv := range attrs {
+			yielded++
+			if !yield(kv) {
+				return
+			}
+		}
+	})
+	if yielded != len(attrs) {
+		t.Errorf("NewDistinct yielded %d attributes, want %d", yielded, len(attrs))
 	}
-
-	h.Write(String("a", "1"))
-	h.Write(String("b", "2"))
-	if got, want := h.Distinct(), distinctBefore; got != want {
-		t.Errorf("h.Distinct() after re-write = %v, want %v", got, want)
+	set := NewSet(attrs...)
+	if want := set.Equivalent(); got != want {
+		t.Errorf("NewDistinct = %v, want %v", got, want)
 	}
 }
 
@@ -693,7 +691,7 @@ func FuzzHashKVs(f *testing.F) {
 	})
 }
 
-func BenchmarkHasher(b *testing.B) {
+func BenchmarkNewDistinct(b *testing.B) {
 	kvs := []KeyValue{
 		String("A", "alpha"),
 		Int64("B", 42),
@@ -702,10 +700,6 @@ func BenchmarkHasher(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		h := NewHasher()
-		for _, kv := range kvs {
-			h.Write(kv)
-		}
-		_ = h.Distinct()
+		_ = NewDistinct(slices.Values(kvs))
 	}
 }

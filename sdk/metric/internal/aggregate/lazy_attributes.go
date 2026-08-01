@@ -31,16 +31,21 @@ func newLazyFilteredAttributes(orig attribute.Set, filter attribute.Filter) lazy
 	l := lazyFilteredAttributes{orig: orig, hasDropped: true}
 
 	n := orig.Len()
-	hasher := attribute.NewHasher()
 	keptCount := 0
-	for i := range n {
-		kv, _ := orig.Get(i)
-		if filter(kv) {
-			hasher.Write(kv)
-			l.recordKept(i, keptCount, n)
-			keptCount++
+	// The filter runs once per attribute inside the sequence, so the kept
+	// indices are recorded in the same pass that feeds the hash.
+	distinct := attribute.NewDistinct(func(yield func(attribute.KeyValue) bool) {
+		for i := range n {
+			kv, _ := orig.Get(i)
+			if filter(kv) {
+				l.recordKept(i, keptCount, n)
+				keptCount++
+				if !yield(kv) {
+					return
+				}
+			}
 		}
-	}
+	})
 	if keptCount == n {
 		l.hasDropped = false
 		l.mask = 0
@@ -52,7 +57,7 @@ func newLazyFilteredAttributes(orig attribute.Set, filter attribute.Filter) lazy
 	if keptCount-keptBefore64 > 0 {
 		l.ensureBigMask(n, keptCount)
 	}
-	l.distinct = hasher.Distinct()
+	l.distinct = distinct
 	return l
 }
 
