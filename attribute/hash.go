@@ -36,11 +36,10 @@ const (
 // Hasher computes a Distinct value from KeyValue attributes supplied with
 // Write.
 //
-// The zero value is ready to use. A Hasher holds a reference to its underlying
-// digest, so it must not be copied after first use.
+// A Hasher must be obtained from [NewHasher]. The zero value is not usable and
+// its methods will panic.
 type Hasher struct {
-	h     xxhash.Hash
-	count int
+	h xxhash.Hash
 }
 
 // NewHasher returns a new Hasher.
@@ -50,10 +49,7 @@ func NewHasher() *Hasher {
 
 // Reset resets h to its initial state so it can be reused.
 func (h *Hasher) Reset() {
-	if !h.h.IsZero() {
-		h.h.Reset()
-	}
-	h.count = 0
+	h.h.Reset()
 }
 
 // Write adds kv to the hash.
@@ -64,38 +60,26 @@ func (h *Hasher) Reset() {
 // If the source contains duplicate keys, retain the last value for each key
 // before calling Write.
 func (h *Hasher) Write(kv KeyValue) {
-	if h.h.IsZero() {
-		h.initZero()
-	}
 	// hashKV mutates the digest h.h refers to in place and returns the same
 	// Hash value it was passed. Discarding the result keeps the digest pointer
 	// from flowing back into h, which would force the digest to be heap
-	// allocated for every Hasher.
+	// allocated for every Hasher. Keeping Write this small also keeps it within
+	// the inlining budget, which matters because hashKVs calls it per attribute.
 	_ = hashKV(h.h, kv)
-	h.count++
-}
-
-// initZero initializes a Hasher created as a zero value rather than with
-// [NewHasher]. It is kept out of line so the digest it allocates does not force
-// the digest allocated by [NewHasher], which callers can keep on the stack, to
-// be heap allocated as well.
-//
-//go:noinline
-func (h *Hasher) initZero() {
-	h.h = xxhash.New()
 }
 
 // Distinct returns the identifier for the attributes written to h. When Write
 // is called as described above, it returns the same value as [Set.Equivalent].
 func (h *Hasher) Distinct() Distinct {
-	if h.count == 0 {
-		return Distinct{hash: emptyHash}
-	}
+	// No count of written attributes is needed to detect the empty case. The
+	// sum of a digest with nothing written to it is emptyHash, which is
+	// non-zero (0xef46db3751d8e999), so it passes through remapZeroHash
+	// unchanged and matches emptySet.Equivalent.
 	return Distinct{hash: remapZeroHash(h.h.Sum64())}
 }
 
-// remapZeroHash remaps a 0 sum for non-empty input to a non-zero value,
-// because hash == 0 is a reserved sentinel (treated as empty/invalid).
+// remapZeroHash remaps a 0 sum to a non-zero value, because hash == 0 is a
+// reserved sentinel (treated as empty/invalid).
 func remapZeroHash(sum uint64) uint64 {
 	if sum == 0 {
 		return 1
@@ -111,13 +95,8 @@ func remapZeroHash(sum uint64) uint64 {
 func hashKVs(kvs []KeyValue) uint64 {
 	h := NewHasher()
 	for _, kv := range kvs {
-		// Equivalent to h.Write(kv), minus the zero-value check that a Hasher
-		// from NewHasher never needs. Everything that determines the resulting
-		// value -- initialization, per-attribute mixing, and the final framing
-		// in Distinct -- is shared with Hasher.
-		_ = hashKV(h.h, kv)
+		h.Write(kv)
 	}
-	h.count = len(kvs)
 	return h.Distinct().hash
 }
 

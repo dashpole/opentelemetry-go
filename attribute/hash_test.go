@@ -287,22 +287,6 @@ func TestHasherMatchesSetEquivalent(t *testing.T) {
 	})
 }
 
-func TestHasherZeroValue(t *testing.T) {
-	var zero Hasher
-	if got, want := zero.Distinct(), emptySet.Equivalent(); got != want {
-		t.Errorf("zero.Distinct() = %v, want %v", got, want)
-	}
-
-	kv := String("key", "value")
-	zero.Write(kv)
-
-	h := NewHasher()
-	h.Write(kv)
-	if got, want := zero.Distinct(), h.Distinct(); got != want {
-		t.Errorf("zero.Distinct() after Write = %v, want %v", got, want)
-	}
-}
-
 func TestHasherReset(t *testing.T) {
 	h := NewHasher()
 	h.Write(String("a", "1"))

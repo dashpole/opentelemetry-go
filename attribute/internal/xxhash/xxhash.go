@@ -63,11 +63,6 @@ func (h Hash) Sum64() uint64 {
 	return h.d.Sum64()
 }
 
-// IsZero reports whether h is the zero value, i.e. it has no backing digest.
-func (h Hash) IsZero() bool {
-	return h.d == nil
-}
-
 // Reset resets the hash to its initial state.
 func (h Hash) Reset() {
 	h.d.Reset()
