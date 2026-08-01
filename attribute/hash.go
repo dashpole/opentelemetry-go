@@ -33,24 +33,24 @@ const (
 	emptyID        uint64 = 7305809155345288421 // "__empty_" (little endian)
 )
 
-// Hasher computes a Distinct value from KeyValue attributes supplied with Write.
-// Attributes MUST be supplied in ascending key order without duplicate keys.
+// Hasher computes a Distinct value from KeyValue attributes supplied with
+// Write.
 //
-// The zero value is ready to use.
+// The zero value is ready to use. A Hasher holds a reference to its underlying
+// digest, so it must not be copied after first use.
 type Hasher struct {
 	h     xxhash.Hash
 	count int
-	init  bool
 }
 
 // NewHasher returns a new Hasher.
-func NewHasher() Hasher {
-	return Hasher{h: *xxhash.New(), init: true}
+func NewHasher() *Hasher {
+	return &Hasher{h: xxhash.New()}
 }
 
-// Reset resets the Hasher to its initial state so it can be reused.
+// Reset resets h to its initial state so it can be reused.
 func (h *Hasher) Reset() {
-	if h.init {
+	if !h.h.IsZero() {
 		h.h.Reset()
 	}
 	h.count = 0
@@ -64,12 +64,25 @@ func (h *Hasher) Reset() {
 // If the source contains duplicate keys, retain the last value for each key
 // before calling Write.
 func (h *Hasher) Write(kv KeyValue) {
-	if !h.init {
-		h.h = *xxhash.New()
-		h.init = true
+	if h.h.IsZero() {
+		h.initZero()
 	}
-	hashKV(&h.h, kv)
+	// hashKV mutates the digest h.h refers to in place and returns the same
+	// Hash value it was passed. Discarding the result keeps the digest pointer
+	// from flowing back into h, which would force the digest to be heap
+	// allocated for every Hasher.
+	_ = hashKV(h.h, kv)
 	h.count++
+}
+
+// initZero initializes a Hasher created as a zero value rather than with
+// [NewHasher]. It is kept out of line so the digest it allocates does not force
+// the digest allocated by [NewHasher], which callers can keep on the stack, to
+// be heap allocated as well.
+//
+//go:noinline
+func (h *Hasher) initZero() {
+	h.h = xxhash.New()
 }
 
 // Distinct returns the identifier for the attributes written to h. When Write
@@ -89,194 +102,200 @@ func (h *Hasher) Distinct() Distinct {
 
 // hashKVs returns a new xxHash64 hash of kvs.
 func hashKVs(kvs []KeyValue) uint64 {
-	h := NewHasher()
+	h := xxhash.New()
 	for _, kv := range kvs {
-		h.Write(kv)
+		h = hashKV(h, kv)
 	}
-	return h.Distinct().hash
+	sum := h.Sum64()
+	// Remap 0 to a non-zero value for non-empty input because hash == 0 is a reserved sentinel (treated as empty/invalid).
+	const remappedZeroHash uint64 = 1
+	if sum == 0 && len(kvs) > 0 {
+		return remappedZeroHash
+	}
+	return sum
 }
 
 // hashKV returns the xxHash64 hash of kv with h as the base.
-func hashKV(h *xxhash.Hash, kv KeyValue) {
-	h.String(string(kv.Key))
-	hashValue(h, kv.Value)
+func hashKV(h xxhash.Hash, kv KeyValue) xxhash.Hash {
+	h = h.String(string(kv.Key))
+	return hashValue(h, kv.Value)
 }
 
-func hashValue(h *xxhash.Hash, v Value) {
+func hashValue(h xxhash.Hash, v Value) xxhash.Hash {
 	switch v.Type() {
 	case BOOL:
-		h.Uint64(boolID)
-		h.Uint64(v.numeric)
+		h = h.Uint64(boolID)
+		h = h.Uint64(v.numeric)
 	case INT64:
-		h.Uint64(int64ID)
-		h.Uint64(v.numeric)
+		h = h.Uint64(int64ID)
+		h = h.Uint64(v.numeric)
 	case FLOAT64:
-		h.Uint64(float64ID)
+		h = h.Uint64(float64ID)
 		// Assumes numeric stored with math.Float64bits.
-		h.Uint64(v.numeric)
+		h = h.Uint64(v.numeric)
 	case STRING:
-		h.Uint64(stringID)
-		h.String(v.stringly)
+		h = h.Uint64(stringID)
+		h = h.String(v.stringly)
 	case BOOLSLICE:
-		h.Uint64(boolSliceID)
+		h = h.Uint64(boolSliceID)
 		switch vals := v.slice.(type) {
 		case [0]bool:
 		case [1]bool:
-			h.Bool(vals[0])
+			h = h.Bool(vals[0])
 		case [2]bool:
-			h.Bool(vals[0])
-			h.Bool(vals[1])
+			h = h.Bool(vals[0])
+			h = h.Bool(vals[1])
 		case [3]bool:
-			h.Bool(vals[0])
-			h.Bool(vals[1])
-			h.Bool(vals[2])
+			h = h.Bool(vals[0])
+			h = h.Bool(vals[1])
+			h = h.Bool(vals[2])
 		default:
 			rv := reflect.ValueOf(v.slice)
 			for i := 0; i < rv.Len(); i++ {
-				h.Bool(rv.Index(i).Bool())
+				h = h.Bool(rv.Index(i).Bool())
 			}
 		}
 	case INT64SLICE:
-		h.Uint64(int64SliceID)
+		h = h.Uint64(int64SliceID)
 		switch vals := v.slice.(type) {
 		case [0]int64:
 		case [1]int64:
-			h.Int64(vals[0])
+			h = h.Int64(vals[0])
 		case [2]int64:
-			h.Int64(vals[0])
-			h.Int64(vals[1])
+			h = h.Int64(vals[0])
+			h = h.Int64(vals[1])
 		case [3]int64:
-			h.Int64(vals[0])
-			h.Int64(vals[1])
-			h.Int64(vals[2])
+			h = h.Int64(vals[0])
+			h = h.Int64(vals[1])
+			h = h.Int64(vals[2])
 		default:
 			rv := reflect.ValueOf(v.slice)
 			for i := 0; i < rv.Len(); i++ {
-				h.Int64(rv.Index(i).Int())
+				h = h.Int64(rv.Index(i).Int())
 			}
 		}
 	case FLOAT64SLICE:
-		h.Uint64(float64SliceID)
+		h = h.Uint64(float64SliceID)
 		switch vals := v.slice.(type) {
 		case [0]float64:
 		case [1]float64:
-			h.Float64(vals[0])
+			h = h.Float64(vals[0])
 		case [2]float64:
-			h.Float64(vals[0])
-			h.Float64(vals[1])
+			h = h.Float64(vals[0])
+			h = h.Float64(vals[1])
 		case [3]float64:
-			h.Float64(vals[0])
-			h.Float64(vals[1])
-			h.Float64(vals[2])
+			h = h.Float64(vals[0])
+			h = h.Float64(vals[1])
+			h = h.Float64(vals[2])
 		default:
 			rv := reflect.ValueOf(v.slice)
 			for i := 0; i < rv.Len(); i++ {
-				h.Float64(rv.Index(i).Float())
+				h = h.Float64(rv.Index(i).Float())
 			}
 		}
 	case STRINGSLICE:
-		h.Uint64(stringSliceID)
+		h = h.Uint64(stringSliceID)
 		switch vals := v.slice.(type) {
 		case [0]string:
 		case [1]string:
-			h.String(vals[0])
+			h = h.String(vals[0])
 		case [2]string:
-			h.String(vals[0])
-			h.String(vals[1])
+			h = h.String(vals[0])
+			h = h.String(vals[1])
 		case [3]string:
-			h.String(vals[0])
-			h.String(vals[1])
-			h.String(vals[2])
+			h = h.String(vals[0])
+			h = h.String(vals[1])
+			h = h.String(vals[2])
 		default:
 			rv := reflect.ValueOf(v.slice)
 			for i := 0; i < rv.Len(); i++ {
-				h.String(rv.Index(i).String())
+				h = h.String(rv.Index(i).String())
 			}
 		}
 	case BYTESLICE:
-		h.Uint64(byteSliceID)
-		h.String(v.stringly)
+		h = h.Uint64(byteSliceID)
+		h = h.String(v.stringly)
 	case SLICE:
-		h.Uint64(sliceID)
+		h = h.Uint64(sliceID)
 		switch vals := v.slice.(type) {
 		case [0]Value:
 			// No values to hash, but the type identifier is still hashed above.
 		case [1]Value:
-			hashValue(h, vals[0])
+			h = hashValue(h, vals[0])
 		case [2]Value:
-			hashValue(h, vals[0])
-			hashValue(h, vals[1])
+			h = hashValue(h, vals[0])
+			h = hashValue(h, vals[1])
 		case [3]Value:
-			hashValue(h, vals[0])
-			hashValue(h, vals[1])
-			hashValue(h, vals[2])
+			h = hashValue(h, vals[0])
+			h = hashValue(h, vals[1])
+			h = hashValue(h, vals[2])
 		case [4]Value:
-			hashValue(h, vals[0])
-			hashValue(h, vals[1])
-			hashValue(h, vals[2])
-			hashValue(h, vals[3])
+			h = hashValue(h, vals[0])
+			h = hashValue(h, vals[1])
+			h = hashValue(h, vals[2])
+			h = hashValue(h, vals[3])
 		case [5]Value:
-			hashValue(h, vals[0])
-			hashValue(h, vals[1])
-			hashValue(h, vals[2])
-			hashValue(h, vals[3])
-			hashValue(h, vals[4])
+			h = hashValue(h, vals[0])
+			h = hashValue(h, vals[1])
+			h = hashValue(h, vals[2])
+			h = hashValue(h, vals[3])
+			h = hashValue(h, vals[4])
 		default:
 			rv := reflect.ValueOf(v.slice)
 			for i := 0; i < rv.Len(); i++ {
-				hashValue(h, rv.Index(i).Interface().(Value))
+				h = hashValue(h, rv.Index(i).Interface().(Value))
 			}
 		}
 	case MAP:
-		h.Uint64(mapID)
+		h = h.Uint64(mapID)
 		switch vals := v.slice.(type) {
 		case [0]KeyValue:
 			// No values to hash, but the type identifier is still hashed above.
 		case [1]KeyValue:
-			h.String(string(vals[0].Key))
-			hashValue(h, vals[0].Value)
+			h = h.String(string(vals[0].Key))
+			h = hashValue(h, vals[0].Value)
 		case [2]KeyValue:
-			h.String(string(vals[0].Key))
-			hashValue(h, vals[0].Value)
-			h.String(string(vals[1].Key))
-			hashValue(h, vals[1].Value)
+			h = h.String(string(vals[0].Key))
+			h = hashValue(h, vals[0].Value)
+			h = h.String(string(vals[1].Key))
+			h = hashValue(h, vals[1].Value)
 		case [3]KeyValue:
-			h.String(string(vals[0].Key))
-			hashValue(h, vals[0].Value)
-			h.String(string(vals[1].Key))
-			hashValue(h, vals[1].Value)
-			h.String(string(vals[2].Key))
-			hashValue(h, vals[2].Value)
+			h = h.String(string(vals[0].Key))
+			h = hashValue(h, vals[0].Value)
+			h = h.String(string(vals[1].Key))
+			h = hashValue(h, vals[1].Value)
+			h = h.String(string(vals[2].Key))
+			h = hashValue(h, vals[2].Value)
 		case [4]KeyValue:
-			h.String(string(vals[0].Key))
-			hashValue(h, vals[0].Value)
-			h.String(string(vals[1].Key))
-			hashValue(h, vals[1].Value)
-			h.String(string(vals[2].Key))
-			hashValue(h, vals[2].Value)
-			h.String(string(vals[3].Key))
-			hashValue(h, vals[3].Value)
+			h = h.String(string(vals[0].Key))
+			h = hashValue(h, vals[0].Value)
+			h = h.String(string(vals[1].Key))
+			h = hashValue(h, vals[1].Value)
+			h = h.String(string(vals[2].Key))
+			h = hashValue(h, vals[2].Value)
+			h = h.String(string(vals[3].Key))
+			h = hashValue(h, vals[3].Value)
 		case [5]KeyValue:
-			h.String(string(vals[0].Key))
-			hashValue(h, vals[0].Value)
-			h.String(string(vals[1].Key))
-			hashValue(h, vals[1].Value)
-			h.String(string(vals[2].Key))
-			hashValue(h, vals[2].Value)
-			h.String(string(vals[3].Key))
-			hashValue(h, vals[3].Value)
-			h.String(string(vals[4].Key))
-			hashValue(h, vals[4].Value)
+			h = h.String(string(vals[0].Key))
+			h = hashValue(h, vals[0].Value)
+			h = h.String(string(vals[1].Key))
+			h = hashValue(h, vals[1].Value)
+			h = h.String(string(vals[2].Key))
+			h = hashValue(h, vals[2].Value)
+			h = h.String(string(vals[3].Key))
+			h = hashValue(h, vals[3].Value)
+			h = h.String(string(vals[4].Key))
+			h = hashValue(h, vals[4].Value)
 		default:
 			rv := reflect.ValueOf(v.slice)
 			for i := 0; i < rv.Len(); i++ {
 				kv := rv.Index(i).Interface().(KeyValue)
-				h.String(string(kv.Key))
-				hashValue(h, kv.Value)
+				h = h.String(string(kv.Key))
+				h = hashValue(h, kv.Value)
 			}
 		}
 	case EMPTY:
-		h.Uint64(emptyID)
+		h = h.Uint64(emptyID)
 	default:
 		// Logging is an alternative, but using the internal logger here
 		// causes an import cycle so it is not done.
@@ -284,4 +303,5 @@ func hashValue(h *xxhash.Hash, v Value) {
 		msg := fmt.Sprintf("unknown value type: %[1]v (%[1]T)", val)
 		panic(msg)
 	}
+	return h
 }

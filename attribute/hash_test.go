@@ -230,11 +230,11 @@ func TestHashValueMapOrdering(t *testing.T) {
 			reversed := slices.Clone(tt.kvs)
 			slices.Reverse(reversed)
 
-			h1 := *xxhash.New()
-			hashValue(&h1, MapValue(tt.kvs...))
+			h1 := xxhash.New()
+			h1 = hashValue(h1, MapValue(tt.kvs...))
 			got := h1.Sum64()
-			h2 := *xxhash.New()
-			hashValue(&h2, MapValue(reversed...))
+			h2 := xxhash.New()
+			h2 = hashValue(h2, MapValue(reversed...))
 			want := h2.Sum64()
 			if got != want {
 				t.Fatalf("hashValue(MapValue(%v)) = %d, want %d", tt.kvs, got, want)
@@ -373,8 +373,8 @@ func BenchmarkHashValueSlice(b *testing.B) {
 		b.Run(bench.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				h := *xxhash.New()
-				hashValue(&h, bench.v)
+				h := xxhash.New()
+				h = hashValue(h, bench.v)
 				_ = h.Sum64()
 			}
 		})
@@ -422,8 +422,8 @@ func BenchmarkHashValueMap(b *testing.B) {
 		b.Run(bench.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				h := *xxhash.New()
-				hashValue(&h, bench.v)
+				h := xxhash.New()
+				h = hashValue(h, bench.v)
 				_ = h.Sum64()
 			}
 		})
