@@ -227,6 +227,7 @@ type expoBuckets struct {
 	counts   []atomic.Uint64
 }
 
+// index returns the slot in counts for bin. It requires len(b.counts) > 0.
 func (b *expoBuckets) index(bin int32) int {
 	return int(bin) & (len(b.counts) - 1)
 }
