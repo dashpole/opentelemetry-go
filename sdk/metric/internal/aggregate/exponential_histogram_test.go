@@ -1749,26 +1749,36 @@ func TestExpoHistogramDataPointMerge(t *testing.T) {
 func verifyBucketInvariants(t *testing.T, b *expoBuckets, msg string) {
 	t.Helper()
 	if b.length == 0 {
-		assert.Equal(t, int32(0), b.startBin, "%s: empty bucket startBin should be 0", msg)
+		if b.startBin != 0 {
+			t.Fatalf("%s: empty bucket startBin should be 0, got %d", msg, b.startBin)
+		}
 		for i := range b.counts {
-			assert.Zero(t, b.counts[i].Load(), "%s: empty bucket counts slot %d should be 0", msg, i)
+			if v := b.counts[i].Load(); v != 0 {
+				t.Fatalf("%s: empty bucket counts slot %d should be 0, got %d", msg, i, v)
+			}
 		}
 		return
 	}
 	// Verify power-of-2 capacity
-	assert.NotEmpty(t, b.counts, "%s: counts slice should not be empty", msg)
-	assert.Zero(t, len(b.counts)&(len(b.counts)-1), "%s: capacity %d is not a power of 2", msg, len(b.counts))
-	assert.GreaterOrEqual(t, len(b.counts), int(b.length), "%s: capacity %d < length %d", msg, len(b.counts), b.length)
+	if len(b.counts) == 0 {
+		t.Fatalf("%s: counts slice should not be empty", msg)
+	}
+	if (len(b.counts) & (len(b.counts) - 1)) != 0 {
+		t.Fatalf("%s: capacity %d is not a power of 2", msg, len(b.counts))
+	}
+	if len(b.counts) < int(b.length) {
+		t.Fatalf("%s: capacity %d < length %d", msg, len(b.counts), b.length)
+	}
 
 	// Check logical slots vs physical unused slots
-	usedSlots := make(map[int]bool)
-	for i := int32(0); i < b.length; i++ {
-		slot := b.index(b.startBin + i)
-		usedSlots[slot] = true
-	}
+	firstSlot := b.index(b.startBin)
+	capMask := len(b.counts) - 1
 	for i := range b.counts {
-		if !usedSlots[i] {
-			assert.Zero(t, b.counts[i].Load(), "%s: unused slot %d should be 0", msg, i)
+		offset := (i - firstSlot) & capMask
+		if offset >= int(b.length) {
+			if v := b.counts[i].Load(); v != 0 {
+				t.Fatalf("%s: unused slot %d should be 0, got %d", msg, i, v)
+			}
 		}
 	}
 }
@@ -1921,12 +1931,16 @@ func TestExpoBucketsProperty(t *testing.T) {
 			}
 
 			// Verify invariant
-			verifyBucketInvariants(t, b, fmt.Sprintf("iter %d op %d", iter, op))
+			verifyBucketInvariants(t, b, "property test")
 
 			// Verify equivalence with reference model
 			if len(ref) == 0 {
-				assert.Zero(t, b.length)
-				assert.Zero(t, b.count())
+				if b.length != 0 {
+					t.Fatalf("iter %d op %d: expected length 0, got %d", iter, op, b.length)
+				}
+				if c := b.count(); c != 0 {
+					t.Fatalf("iter %d op %d: expected count 0, got %d", iter, op, c)
+				}
 			} else {
 				var minBin, maxBin int32 = math.MaxInt32, math.MinInt32
 				var totalCount uint64
@@ -1942,13 +1956,23 @@ func TestExpoBucketsProperty(t *testing.T) {
 					}
 				}
 				if totalCount == 0 {
-					assert.Zero(t, b.count())
+					if c := b.count(); c != 0 {
+						t.Fatalf("iter %d op %d: expected count 0, got %d", iter, op, c)
+					}
 				} else {
-					assert.Equal(t, minBin, b.startBin)
-					assert.Equal(t, maxBin-minBin+1, b.length)
-					assert.Equal(t, totalCount, b.count())
+					if b.startBin != minBin {
+						t.Fatalf("iter %d op %d: expected startBin %d, got %d", iter, op, minBin, b.startBin)
+					}
+					if expectedLen := maxBin - minBin + 1; b.length != expectedLen {
+						t.Fatalf("iter %d op %d: expected length %d, got %d", iter, op, expectedLen, b.length)
+					}
+					if c := b.count(); c != totalCount {
+						t.Fatalf("iter %d op %d: expected count %d, got %d", iter, op, totalCount, c)
+					}
 					for k := minBin; k <= maxBin; k++ {
-						assert.Equal(t, ref[k], b.counts[b.index(k)].Load())
+						if expected, actual := ref[k], b.counts[b.index(k)].Load(); expected != actual {
+							t.Fatalf("iter %d op %d: bin %d expected count %d, got %d", iter, op, k, expected, actual)
+						}
 					}
 				}
 			}
