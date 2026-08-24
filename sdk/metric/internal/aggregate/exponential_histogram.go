@@ -218,7 +218,7 @@ const minBucketCapacity = 1
 // expoBuckets is a circular buffer of bucket counts in an exponential histogram.
 //
 // The logical range is [startBin, startBin + length - 1].
-// Physical storage is counts []atomic.Uint64 with len(counts) always a power of 2 (or nil when empty).
+// Physical storage is counts []atomic.Uint64 with len(counts) always a power of 2 (or nil when unallocated).
 // Indexing into counts uses bitwise AND mask: int(bin) & (len(counts)-1).
 // Invariant: every slot in counts outside the logical range holds zero.
 type expoBuckets struct {
