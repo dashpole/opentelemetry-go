@@ -1878,6 +1878,19 @@ func TestExpoBucketsClearPreservesCapacity(t *testing.T) {
 	verifyBucketInvariants(t, b, "after re-record")
 }
 
+func TestExpoBucketsRecordZeroCount(t *testing.T) {
+	b := new(expoBuckets)
+	b.recordCount(10, 0)
+	assert.Equal(t, int32(0), b.startBin)
+	assert.Equal(t, int32(0), b.length)
+	assert.Empty(t, b.counts)
+
+	b2 := newBucket(5, []uint64{10, 20})
+	b2.recordCount(5, 0)
+	b2.recordCount(100, 0)
+	assertBuckets(t, 5, []uint64{10, 20}, *b2, "zero count records are no-ops")
+}
+
 func TestExpoBucketsProperty(t *testing.T) {
 	rng := rand.New(rand.NewSource(42))
 	for iter := range 1000 {
