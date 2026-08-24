@@ -213,7 +213,7 @@ func (p *expoHistogramDataPoint[N]) count() uint64 {
 	return p.posBuckets.count() + p.negBuckets.count() + p.zeroCount.Load()
 }
 
-const minBucketCapacity = 4
+const minBucketCapacity = 1
 
 // expoBuckets is a circular buffer of bucket counts in an exponential histogram.
 //
