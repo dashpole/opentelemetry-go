@@ -452,8 +452,13 @@ func (b *expoBuckets) downscale(delta int32) {
 	newEndBin := (b.startBin + b.length - 1) >> delta
 	newLength := newEndBin - newStartBin + 1
 
-	// TODO: Explore using a sync.Pool for scratch buffer to avoid allocations during downscaling.
-	scratch := make([]uint64, newLength)
+	var stackScratch [256]uint64
+	var scratch []uint64
+	if int(newLength) <= len(stackScratch) {
+		scratch = stackScratch[:newLength]
+	} else {
+		scratch = make([]uint64, newLength)
+	}
 
 	for i := int32(0); i < b.length; i++ {
 		oldBin := b.startBin + i
