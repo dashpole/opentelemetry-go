@@ -287,7 +287,7 @@ func (b *expoBuckets) recordCount(bin int32, count uint64) {
 		newStartBin = b.startBin
 		newEndBin = bin
 	}
-	newLength := int32(int(newEndBin) - int(newStartBin) + 1)
+	newLength := newEndBin - newStartBin + 1
 
 	if int(newLength) > len(b.counts) {
 		newCap := nextPowerOf2(newLength)
