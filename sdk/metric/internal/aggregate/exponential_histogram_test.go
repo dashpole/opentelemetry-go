@@ -651,9 +651,9 @@ func TestExpoHistogramOverflow(t *testing.T) {
 
 func BenchmarkPrepend(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		agg := newExpoHistogramDataPoint[float64](alice, 1024, 20, false, false, nil, y2kPlus(0))
+		agg := newExpoHistogramDataPoint[float64](alice, 160, 20, false, false, nil, y2kPlus(0))
 		n := math.MaxFloat64
-		for range 1024 {
+		for range 160 {
 			agg.record(n)
 			n /= 2
 		}
@@ -662,9 +662,9 @@ func BenchmarkPrepend(b *testing.B) {
 
 func BenchmarkAppend(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		agg := newExpoHistogramDataPoint[float64](alice, 1024, 20, false, false, nil, y2kPlus(0))
+		agg := newExpoHistogramDataPoint[float64](alice, 160, 20, false, false, nil, y2kPlus(0))
 		n := smallestNonZeroNormalFloat64
-		for range 1024 {
+		for range 160 {
 			agg.record(n)
 			n *= 2
 		}
