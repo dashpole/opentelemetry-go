@@ -453,6 +453,11 @@ func (b *expoBuckets) downscale(delta int32) {
 	newEndBin := (b.startBin + b.length - 1) >> delta
 	newLength := newEndBin - newStartBin + 1
 
+	// stackScratch is sized to 256 to cover the OpenTelemetry specification default
+	// max_size of 160 (and any configuration where newLength <= 256) without heap
+	// allocations, while keeping the stack frame small (2 KiB).
+	//
+	// TODO: Explore pooling scratch space for maxSize greater than 160.
 	var stackScratch [256]uint64
 	var scratch []uint64
 	if int(newLength) <= len(stackScratch) {
