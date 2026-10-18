@@ -94,6 +94,7 @@ type collector struct {
 	disableTargetInfo bool
 	targetInfo        prometheus.Metric
 	metricFamilies    map[string]*dto.MetricFamily
+	metricNames       map[otlptranslator.Metric]string
 
 	resourceKeyValsOnce sync.Once
 	resourceKeyVals     keyVals
@@ -136,6 +137,7 @@ func New(opts ...Option) (*Exporter, error) {
 		withoutCounterSuffixes:   cfg.withoutCounterSuffixes,
 		disableScopeInfo:         cfg.disableScopeInfo,
 		metricFamilies:           make(map[string]*dto.MetricFamily),
+		metricNames:              make(map[otlptranslator.Metric]string),
 		namespace:                escapedNamespace,
 		resourceAttributesFilter: cfg.resourceAttributesFilter,
 		metricNamer:              otlptranslator.NewMetricNamer(escapedNamespace, cfg.translationStrategy),
@@ -264,14 +266,13 @@ func (c *collector) Collect(ch chan<- prometheus.Metric) {
 			kv.keys = append(kv.keys, scopeNameLabel, scopeVersionLabel, scopeSchemaLabel)
 			kv.vals = append(kv.vals, scopeMetrics.Scope.Name, scopeMetrics.Scope.Version, scopeMetrics.Scope.SchemaURL)
 
-			attrKeys, attrVals, e := getScopeAttrs(scopeMetrics.Scope.Attributes, c.labelNamer)
+			var e error
+			kv, e = appendScopeAttrs(kv, scopeMetrics.Scope.Attributes, c.labelNamer)
 			if e != nil {
 				reportError(ch, nil, e)
 				err = errors.Join(err, fmt.Errorf("failed to translate scope attributes for ScopeMetrics %d: %w", j, e))
 				continue
 			}
-			kv.keys = append(kv.keys, attrKeys...)
-			kv.vals = append(kv.vals, attrVals...)
 		}
 
 		kv.keys = append(kv.keys, c.resourceKeyVals.keys...)
@@ -392,17 +393,21 @@ func addExponentialHistogramMetric[N int64 | float64](
 		defer func() { op.End(success, err) }()
 	}
 
+	var (
+		lastDesc *prometheus.Desc
+		lastKeys []string
+	)
 	for j, dp := range histogram.DataPoints {
-		keys, values, e := getAttrs(dp.Attributes, labelNamer)
+		keys, values, e := getAttrsWithKV(dp.Attributes, kv, labelNamer)
 		if e != nil {
 			reportError(ch, nil, e)
 			err = errors.Join(err, fmt.Errorf("failed to getAttrs for histogram.DataPoints %d: %w", j, e))
 			continue
 		}
-		keys = append(keys, kv.keys...)
-		values = append(values, kv.vals...)
 
-		desc := prometheus.NewDesc(name, m.Description, keys, nil)
+		var desc *prometheus.Desc
+		desc, lastKeys = getOrReuseDesc(name, m.Description, keys, lastKeys, lastDesc)
+		lastDesc = desc
 
 		// Prometheus native histograms support scales in the range [-4, 8]
 		scale := dp.Scale
@@ -429,7 +434,7 @@ func addExponentialHistogramMetric[N int64 | float64](
 		}
 
 		// From spec: note that Prometheus Native Histograms buckets are indexed by upper boundary while Exponential Histograms are indexed by lower boundary, the result being that the Offset fields are different-by-one.
-		positiveBuckets := make(map[int]int64)
+		positiveBuckets := make(map[int]int64, len(positiveBucket.Counts))
 		for i, c := range positiveBucket.Counts {
 			if c > math.MaxInt64 {
 				e := fmt.Errorf("positive count %d is too large to be represented as int64", c)
@@ -440,7 +445,7 @@ func addExponentialHistogramMetric[N int64 | float64](
 			positiveBuckets[int(positiveBucket.Offset)+i+1] = int64(c) // nolint: gosec  // Size check above.
 		}
 
-		negativeBuckets := make(map[int]int64)
+		negativeBuckets := make(map[int]int64, len(negativeBucket.Counts))
 		for i, c := range negativeBucket.Counts {
 			if c > math.MaxInt64 {
 				e := fmt.Errorf("negative count %d is too large to be represented as int64", c)
@@ -495,17 +500,21 @@ func addHistogramMetric[N int64 | float64](
 		defer func() { op.End(success, err) }()
 	}
 
+	var (
+		lastDesc *prometheus.Desc
+		lastKeys []string
+	)
 	for j, dp := range histogram.DataPoints {
-		keys, values, e := getAttrs(dp.Attributes, labelNamer)
+		keys, values, e := getAttrsWithKV(dp.Attributes, kv, labelNamer)
 		if e != nil {
 			reportError(ch, nil, e)
 			err = errors.Join(err, fmt.Errorf("failed to getAttrs for histogram.DataPoints %d: %w", j, e))
 			continue
 		}
-		keys = append(keys, kv.keys...)
-		values = append(values, kv.vals...)
 
-		desc := prometheus.NewDesc(name, m.Description, keys, nil)
+		var desc *prometheus.Desc
+		desc, lastKeys = getOrReuseDesc(name, m.Description, keys, lastKeys, lastDesc)
+		lastDesc = desc
 		buckets := make(map[float64]uint64, len(dp.Bounds))
 
 		cumulativeCount := uint64(0)
@@ -548,17 +557,21 @@ func addSumMetric[N int64 | float64](
 		valueType = prometheus.GaugeValue
 	}
 
+	var (
+		lastDesc *prometheus.Desc
+		lastKeys []string
+	)
 	for i, dp := range sum.DataPoints {
-		keys, values, e := getAttrs(dp.Attributes, labelNamer)
+		keys, values, e := getAttrsWithKV(dp.Attributes, kv, labelNamer)
 		if e != nil {
 			reportError(ch, nil, e)
 			err = errors.Join(err, fmt.Errorf("failed to getAttrs for sum.DataPoints %d: %w", i, e))
 			continue
 		}
-		keys = append(keys, kv.keys...)
-		values = append(values, kv.vals...)
 
-		desc := prometheus.NewDesc(name, m.Description, keys, nil)
+		var desc *prometheus.Desc
+		desc, lastKeys = getOrReuseDesc(name, m.Description, keys, lastKeys, lastDesc)
+		lastDesc = desc
 		m, e := prometheus.NewConstMetric(desc, valueType, float64(dp.Value), values...)
 		if e != nil {
 			reportError(ch, desc, e)
@@ -593,17 +606,21 @@ func addGaugeMetric[N int64 | float64](
 		defer func() { op.End(success, err) }()
 	}
 
+	var (
+		lastDesc *prometheus.Desc
+		lastKeys []string
+	)
 	for i, dp := range gauge.DataPoints {
-		keys, values, e := getAttrs(dp.Attributes, labelNamer)
+		keys, values, e := getAttrsWithKV(dp.Attributes, kv, labelNamer)
 		if e != nil {
 			reportError(ch, nil, e)
 			err = errors.Join(err, fmt.Errorf("failed to getAttrs for gauge.DataPoints %d: %w", i, e))
 			continue
 		}
-		keys = append(keys, kv.keys...)
-		values = append(values, kv.vals...)
 
-		desc := prometheus.NewDesc(name, m.Description, keys, nil)
+		var desc *prometheus.Desc
+		desc, lastKeys = getOrReuseDesc(name, m.Description, keys, lastKeys, lastDesc)
+		lastDesc = desc
 		m, e := prometheus.NewConstMetric(desc, prometheus.GaugeValue, float64(dp.Value), values...)
 		if e != nil {
 			reportError(ch, desc, e)
@@ -616,84 +633,220 @@ func addGaugeMetric[N int64 | float64](
 	}
 }
 
+type labelCacheKey struct {
+	key   string
+	namer otlptranslator.LabelNamer
+	scope bool
+}
+
+const maxLabelCacheSize = 4096
+
+var (
+	labelCacheMu sync.RWMutex
+	labelCache   = make(map[labelCacheKey]string)
+
+	metricTypeCounter   = dto.MetricType_COUNTER
+	metricTypeGauge     = dto.MetricType_GAUGE
+	metricTypeHistogram = dto.MetricType_HISTOGRAM
+)
+
+func isCompliantLabelName(name string, preserveMultipleUnderscores bool) bool {
+	if len(name) == 0 {
+		return false
+	}
+	c0 := name[0]
+	if (c0 < 'a' || c0 > 'z') && (c0 < 'A' || c0 > 'Z') {
+		return false
+	}
+	for i := 1; i < len(name); i++ {
+		c := name[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			continue
+		}
+		if c == '_' && (preserveMultipleUnderscores || name[i-1] != '_') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func buildLabelName(labelNamer otlptranslator.LabelNamer, key string) (string, error) {
+	if isCompliantLabelName(key, labelNamer.PreserveMultipleUnderscores) {
+		return key, nil
+	}
+	if labelNamer.UTF8Allowed {
+		return labelNamer.Build(key)
+	}
+	cacheKey := labelCacheKey{key: key, namer: labelNamer}
+	labelCacheMu.RLock()
+	sanitized, ok := labelCache[cacheKey]
+	labelCacheMu.RUnlock()
+	if ok {
+		return sanitized, nil
+	}
+	sanitized, err := labelNamer.Build(key)
+	if err != nil {
+		return "", err
+	}
+	labelCacheMu.Lock()
+	if len(labelCache) < maxLabelCacheSize {
+		labelCache[cacheKey] = sanitized
+	}
+	labelCacheMu.Unlock()
+	return sanitized, nil
+}
+
+func buildScopeLabelName(labelNamer otlptranslator.LabelNamer, rawKey string) (string, bool, error) {
+	cacheKey := labelCacheKey{key: rawKey, namer: labelNamer, scope: true}
+	labelCacheMu.RLock()
+	scoped, ok := labelCache[cacheKey]
+	labelCacheMu.RUnlock()
+	if ok {
+		return scoped, false, nil
+	}
+
+	var key string
+	if labelNamer.UTF8Allowed {
+		key = rawKey
+	} else {
+		var err error
+		key, err = buildLabelName(labelNamer, rawKey)
+		if err != nil {
+			return "", false, err
+		}
+	}
+	if isReservedScopeLabel(key) {
+		return "", true, nil
+	}
+	scoped = scopeLabelPrefix + key
+	labelCacheMu.Lock()
+	if len(labelCache) < maxLabelCacheSize {
+		labelCache[cacheKey] = scoped
+	}
+	labelCacheMu.Unlock()
+	return scoped, false, nil
+}
+
+func getOrReuseDesc(name, description string, keys, lastKeys []string, lastDesc *prometheus.Desc) (*prometheus.Desc, []string) {
+	if lastDesc != nil && slices.Equal(keys, lastKeys) {
+		return lastDesc, lastKeys
+	}
+	return prometheus.NewDesc(name, description, keys, nil), keys
+}
+
 // getAttrs converts the attribute.Set to two lists of matching Prometheus-style
 // keys and values.
 func getAttrs(attrs attribute.Set, labelNamer otlptranslator.LabelNamer) ([]string, []string, error) {
-	keys := make([]string, 0, attrs.Len())
-	values := make([]string, 0, attrs.Len())
+	return getAttrsWithKV(attrs, keyVals{}, labelNamer)
+}
+
+func getAttrsWithKV(attrs attribute.Set, kv keyVals, labelNamer otlptranslator.LabelNamer) ([]string, []string, error) {
+	if attrs.Len() == 0 {
+		return kv.keys, kv.vals, nil
+	}
+	n := attrs.Len() + len(kv.keys)
+	keys := make([]string, 0, n)
+	values := make([]string, 0, n)
 	itr := attrs.Iter()
 
 	if labelNamer.UTF8Allowed {
 		// Do not perform sanitization if prometheus supports UTF-8.
 		for itr.Next() {
-			kv := itr.Attribute()
-			keys = append(keys, string(kv.Key))
-			values = append(values, kv.Value.String())
+			attr := itr.Attribute()
+			keys = append(keys, string(attr.Key))
+			values = append(values, attr.Value.String())
 		}
 	} else {
 		// It sanitizes invalid characters and handles duplicate keys
 		// (due to sanitization) by sorting and concatenating the values following the spec.
-		keysMap := make(map[string][]string)
+		var dups map[int][]string
 		for itr.Next() {
-			kv := itr.Attribute()
-			key, err := labelNamer.Build(string(kv.Key))
+			attr := itr.Attribute()
+			key, err := buildLabelName(labelNamer, string(attr.Key))
 			if err != nil {
 				return nil, nil, err
 			}
-			if _, ok := keysMap[key]; !ok {
-				keysMap[key] = []string{kv.Value.String()}
-			} else {
-				// if the sanitized key is a duplicate, append to the list of keys
-				keysMap[key] = append(keysMap[key], kv.Value.String())
+			val := attr.Value.String()
+			if idx := slices.Index(keys, key); idx >= 0 {
+				if dups == nil {
+					dups = make(map[int][]string)
+				}
+				if existing, ok := dups[idx]; ok {
+					dups[idx] = append(existing, val)
+				} else {
+					dups[idx] = []string{values[idx], val}
+				}
+				continue
 			}
-		}
-		for key, vals := range keysMap {
 			keys = append(keys, key)
+			values = append(values, val)
+		}
+		for idx, vals := range dups {
 			slices.Sort(vals)
-			values = append(values, strings.Join(vals, ";"))
+			values[idx] = strings.Join(vals, ";")
 		}
 	}
+	keys = append(keys, kv.keys...)
+	values = append(values, kv.vals...)
 	return keys, values, nil
 }
 
-func getScopeAttrs(attrs attribute.Set, labelNamer otlptranslator.LabelNamer) ([]string, []string, error) {
-	keys := make([]string, 0, attrs.Len())
-	values := make([]string, 0, attrs.Len())
+func appendScopeAttrs(kv keyVals, attrs attribute.Set, labelNamer otlptranslator.LabelNamer) (keyVals, error) {
+	if attrs.Len() == 0 {
+		return kv, nil
+	}
 	itr := attrs.Iter()
 
 	if labelNamer.UTF8Allowed {
 		for itr.Next() {
-			kv := itr.Attribute()
-			key := string(kv.Key)
-			if isReservedScopeLabel(key) {
+			attr := itr.Attribute()
+			scopeKey, reserved, err := buildScopeLabelName(labelNamer, string(attr.Key))
+			if err != nil {
+				return kv, err
+			}
+			if reserved {
 				continue
 			}
-			keys = append(keys, scopeLabelPrefix+key)
-			values = append(values, kv.Value.String())
+			kv.keys = append(kv.keys, scopeKey)
+			kv.vals = append(kv.vals, attr.Value.String())
 		}
-		return keys, values, nil
+		return kv, nil
 	}
 
-	keysMap := make(map[string][]string)
+	startIdx := len(kv.keys)
+	var dups map[int][]string
 	for itr.Next() {
-		kv := itr.Attribute()
-		key, err := labelNamer.Build(string(kv.Key))
+		attr := itr.Attribute()
+		scopeKey, reserved, err := buildScopeLabelName(labelNamer, string(attr.Key))
 		if err != nil {
-			return nil, nil, err
+			return kv, err
 		}
-		if isReservedScopeLabel(key) {
+		if reserved {
 			continue
 		}
-		keysMap[key] = append(keysMap[key], kv.Value.String())
+		val := attr.Value.String()
+		if relIdx := slices.Index(kv.keys[startIdx:], scopeKey); relIdx >= 0 {
+			idx := startIdx + relIdx
+			if dups == nil {
+				dups = make(map[int][]string)
+			}
+			if existing, ok := dups[idx]; ok {
+				dups[idx] = append(existing, val)
+			} else {
+				dups[idx] = []string{kv.vals[idx], val}
+			}
+			continue
+		}
+		kv.keys = append(kv.keys, scopeKey)
+		kv.vals = append(kv.vals, val)
 	}
-
-	for key, vals := range keysMap {
-		keys = append(keys, scopeLabelPrefix+key)
+	for idx, vals := range dups {
 		slices.Sort(vals)
-		values = append(values, strings.Join(vals, ";"))
+		kv.vals[idx] = strings.Join(vals, ";")
 	}
 
-	return keys, values, nil
+	return kv, nil
 }
 
 func isReservedScopeLabel(key string) bool {
@@ -724,27 +877,46 @@ func (c *collector) getName(m metricdata.Metrics) (string, error) {
 	if !c.withoutUnits {
 		translatorMetric.Unit = m.Unit
 	}
-	return c.metricNamer.Build(translatorMetric)
+
+	c.mu.Lock()
+	if name, ok := c.metricNames[translatorMetric]; ok {
+		c.mu.Unlock()
+		return name, nil
+	}
+	c.mu.Unlock()
+
+	name, err := c.metricNamer.Build(translatorMetric)
+	if err != nil {
+		return "", err
+	}
+
+	c.mu.Lock()
+	if c.metricNames == nil {
+		c.metricNames = make(map[otlptranslator.Metric]string)
+	}
+	c.metricNames[translatorMetric] = name
+	c.mu.Unlock()
+	return name, nil
 }
 
 func (*collector) metricType(m metricdata.Metrics) *dto.MetricType {
 	switch v := m.Data.(type) {
 	case metricdata.ExponentialHistogram[int64], metricdata.ExponentialHistogram[float64]:
-		return dto.MetricType_HISTOGRAM.Enum()
+		return &metricTypeHistogram
 	case metricdata.Histogram[int64], metricdata.Histogram[float64]:
-		return dto.MetricType_HISTOGRAM.Enum()
+		return &metricTypeHistogram
 	case metricdata.Sum[float64]:
 		if v.IsMonotonic {
-			return dto.MetricType_COUNTER.Enum()
+			return &metricTypeCounter
 		}
-		return dto.MetricType_GAUGE.Enum()
+		return &metricTypeGauge
 	case metricdata.Sum[int64]:
 		if v.IsMonotonic {
-			return dto.MetricType_COUNTER.Enum()
+			return &metricTypeCounter
 		}
-		return dto.MetricType_GAUGE.Enum()
+		return &metricTypeGauge
 	case metricdata.Gauge[int64], metricdata.Gauge[float64]:
-		return dto.MetricType_GAUGE.Enum()
+		return &metricTypeGauge
 	}
 	return nil
 }
@@ -861,9 +1033,9 @@ func addExemplars[N int64 | float64](
 }
 
 func attributesToLabels(attrs []attribute.KeyValue, labelNamer otlptranslator.LabelNamer) (prometheus.Labels, error) {
-	labels := make(map[string]string)
+	labels := make(map[string]string, len(attrs)+2)
 	for _, attr := range attrs {
-		name, err := labelNamer.Build(string(attr.Key))
+		name, err := buildLabelName(labelNamer, string(attr.Key))
 		if err != nil {
 			return nil, err
 		}
