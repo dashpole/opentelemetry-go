@@ -616,6 +616,97 @@ func addGaugeMetric[N int64 | float64](
 	}
 }
 
+type labelCacheKey struct {
+	key   string
+	namer otlptranslator.LabelNamer
+	scope bool
+}
+
+const maxLabelCacheSize = 4096
+
+var (
+	labelCacheMu sync.RWMutex
+	labelCache   = make(map[labelCacheKey]string)
+)
+
+func isCompliantLabelName(name string, preserveMultipleUnderscores bool) bool {
+	if len(name) == 0 {
+		return false
+	}
+	c0 := name[0]
+	if (c0 < 'a' || c0 > 'z') && (c0 < 'A' || c0 > 'Z') {
+		return false
+	}
+	for i := 1; i < len(name); i++ {
+		c := name[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			continue
+		}
+		if c == '_' && (preserveMultipleUnderscores || name[i-1] != '_') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func buildLabelName(labelNamer otlptranslator.LabelNamer, key string) (string, error) {
+	if isCompliantLabelName(key, labelNamer.PreserveMultipleUnderscores) {
+		return key, nil
+	}
+	if labelNamer.UTF8Allowed {
+		return labelNamer.Build(key)
+	}
+	cacheKey := labelCacheKey{key: key, namer: labelNamer}
+	labelCacheMu.RLock()
+	sanitized, ok := labelCache[cacheKey]
+	labelCacheMu.RUnlock()
+	if ok {
+		return sanitized, nil
+	}
+	sanitized, err := labelNamer.Build(key)
+	if err != nil {
+		return "", err
+	}
+	labelCacheMu.Lock()
+	if len(labelCache) < maxLabelCacheSize {
+		labelCache[cacheKey] = sanitized
+	}
+	labelCacheMu.Unlock()
+	return sanitized, nil
+}
+
+func buildScopeLabelName(labelNamer otlptranslator.LabelNamer, rawKey string) (string, bool, error) {
+	cacheKey := labelCacheKey{key: rawKey, namer: labelNamer, scope: true}
+	labelCacheMu.RLock()
+	scoped, ok := labelCache[cacheKey]
+	labelCacheMu.RUnlock()
+	if ok {
+		return scoped, false, nil
+	}
+
+	var key string
+	if labelNamer.UTF8Allowed {
+		key = rawKey
+	} else {
+		var err error
+		key, err = buildLabelName(labelNamer, rawKey)
+		if err != nil {
+			return "", false, err
+		}
+	}
+	if isReservedScopeLabel(key) {
+		return "", true, nil
+	}
+	scoped = scopeLabelPrefix + key
+	labelCacheMu.Lock()
+	if len(labelCache) < maxLabelCacheSize {
+		labelCache[cacheKey] = scoped
+	}
+	labelCacheMu.Unlock()
+	return scoped, false, nil
+}
+
 // getAttrs converts the attribute.Set to two lists of matching Prometheus-style
 // keys and values.
 func getAttrs(attrs attribute.Set, labelNamer otlptranslator.LabelNamer) ([]string, []string, error) {
@@ -636,7 +727,7 @@ func getAttrs(attrs attribute.Set, labelNamer otlptranslator.LabelNamer) ([]stri
 		keysMap := make(map[string][]string)
 		for itr.Next() {
 			kv := itr.Attribute()
-			key, err := labelNamer.Build(string(kv.Key))
+			key, err := buildLabelName(labelNamer, string(kv.Key))
 			if err != nil {
 				return nil, nil, err
 			}
@@ -664,11 +755,14 @@ func getScopeAttrs(attrs attribute.Set, labelNamer otlptranslator.LabelNamer) ([
 	if labelNamer.UTF8Allowed {
 		for itr.Next() {
 			kv := itr.Attribute()
-			key := string(kv.Key)
-			if isReservedScopeLabel(key) {
+			scopeKey, reserved, err := buildScopeLabelName(labelNamer, string(kv.Key))
+			if err != nil {
+				return nil, nil, err
+			}
+			if reserved {
 				continue
 			}
-			keys = append(keys, scopeLabelPrefix+key)
+			keys = append(keys, scopeKey)
 			values = append(values, kv.Value.String())
 		}
 		return keys, values, nil
@@ -677,18 +771,18 @@ func getScopeAttrs(attrs attribute.Set, labelNamer otlptranslator.LabelNamer) ([
 	keysMap := make(map[string][]string)
 	for itr.Next() {
 		kv := itr.Attribute()
-		key, err := labelNamer.Build(string(kv.Key))
+		scopeKey, reserved, err := buildScopeLabelName(labelNamer, string(kv.Key))
 		if err != nil {
 			return nil, nil, err
 		}
-		if isReservedScopeLabel(key) {
+		if reserved {
 			continue
 		}
-		keysMap[key] = append(keysMap[key], kv.Value.String())
+		keysMap[scopeKey] = append(keysMap[scopeKey], kv.Value.String())
 	}
 
-	for key, vals := range keysMap {
-		keys = append(keys, scopeLabelPrefix+key)
+	for scopeKey, vals := range keysMap {
+		keys = append(keys, scopeKey)
 		slices.Sort(vals)
 		values = append(values, strings.Join(vals, ";"))
 	}
@@ -863,7 +957,7 @@ func addExemplars[N int64 | float64](
 func attributesToLabels(attrs []attribute.KeyValue, labelNamer otlptranslator.LabelNamer) (prometheus.Labels, error) {
 	labels := make(map[string]string)
 	for _, attr := range attrs {
-		name, err := labelNamer.Build(string(attr.Key))
+		name, err := buildLabelName(labelNamer, string(attr.Key))
 		if err != nil {
 			return nil, err
 		}

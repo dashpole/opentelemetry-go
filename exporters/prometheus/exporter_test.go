@@ -69,6 +69,18 @@ func TestGetAttrs(t *testing.T) {
 	require.Equal(t, []string{"[true,false]", "Infinity", `["foo","bar"]`}, values)
 }
 
+func TestIsCompliantLabelName(t *testing.T) {
+	assert.True(t, isCompliantLabelName("a", false))
+	assert.True(t, isCompliantLabelName("Z_0_9", false))
+	assert.False(t, isCompliantLabelName("", false))
+	assert.False(t, isCompliantLabelName("0abc", false))
+	assert.False(t, isCompliantLabelName("_abc", false))
+	assert.False(t, isCompliantLabelName("__reserved__", false))
+	assert.False(t, isCompliantLabelName("a__b", false))
+	assert.True(t, isCompliantLabelName("a__b", true))
+	assert.False(t, isCompliantLabelName("a.b", false))
+}
+
 func TestAttributesToLabels(t *testing.T) {
 	labels, err := attributesToLabels([]attribute.KeyValue{
 		attribute.Float64Slice("float_slice", []float64{math.NaN(), math.Inf(1)}),
