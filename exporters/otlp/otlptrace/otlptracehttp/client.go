@@ -70,6 +70,7 @@ type client struct {
 	requestFunc   retry.RequestFunc
 	client        *http.Client
 	exportTimeout time.Duration
+	startErr      error
 	stopCh        chan struct{}
 	stopOnce      sync.Once
 
@@ -78,6 +79,17 @@ type client struct {
 }
 
 var _ otlptrace.Client = (*client)(nil)
+
+type contextCheckRoundTripper struct {
+	base http.RoundTripper
+}
+
+func (rt contextCheckRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
+	return rt.base.RoundTrip(req)
+}
 
 // NewClient creates a new HTTP trace client.
 func NewClient(opts ...Option) otlptrace.Client {
@@ -106,6 +118,21 @@ func NewClient(opts ...Option) otlptrace.Client {
 			}
 		}
 	}
+	var startErr error
+	if cfg.Traces.AuthenticatorRoundTripper != nil {
+		hcCopy := *httpClient
+		baseTransport := hcCopy.Transport
+		if baseTransport == nil {
+			baseTransport = ourTransport.Clone()
+		}
+		rt, err := cfg.Traces.AuthenticatorRoundTripper(contextCheckRoundTripper{base: baseTransport})
+		if err != nil {
+			startErr = err
+		} else {
+			hcCopy.Transport = rt
+			httpClient = &hcCopy
+		}
+	}
 
 	stopCh := make(chan struct{})
 	return &client{
@@ -116,6 +143,7 @@ func NewClient(opts ...Option) otlptrace.Client {
 		stopCh:        stopCh,
 		client:        httpClient,
 		exportTimeout: exportTimeout,
+		startErr:      startErr,
 		instID:        counter.NextExporterID(),
 	}
 }
@@ -124,6 +152,9 @@ func NewClient(opts ...Option) otlptrace.Client {
 func (c *client) Start(ctx context.Context) error {
 	if c.cfg.Insecure && c.cfg.TLSCfg != nil {
 		return errInsecureEndpointWithTLS
+	}
+	if c.startErr != nil {
+		return c.startErr
 	}
 
 	// Initialize the instrumentation if not already done.
@@ -147,15 +178,19 @@ func (c *client) Start(ctx context.Context) error {
 
 // Stop shuts down the client and interrupt any in-flight request.
 func (c *client) Stop(ctx context.Context) error {
+	var authErr error
 	c.stopOnce.Do(func() {
 		close(c.stopCh)
+		if c.cfg.AuthenticatorShutdown != nil {
+			authErr = c.cfg.AuthenticatorShutdown(ctx)
+		}
 	})
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
-	return nil
+	return authErr
 }
 
 // UploadTraces sends a batch of spans to the collector.
@@ -353,6 +388,7 @@ func (c *client) newRequest(pbRequest *coltracepb.ExportTraceServiceRequest) (re
 		req.GetBody = bodyReaderErr(b.Bytes())
 	}
 
+	req.baseHeader = r.Header.Clone()
 	return req, nil
 }
 
@@ -383,6 +419,7 @@ func bodyReaderErr(buf []byte) func() (io.ReadCloser, error) {
 type request struct {
 	*http.Request
 
+	baseHeader http.Header
 	// bodyReader allows the same body to be used for multiple requests.
 	bodyReader func() io.ReadCloser
 }
@@ -391,6 +428,9 @@ type request struct {
 func (r *request) reset(ctx context.Context) {
 	r.Body = r.bodyReader()
 	r.Request = r.WithContext(ctx)
+	if r.baseHeader != nil {
+		r.Header = r.baseHeader.Clone()
+	}
 }
 
 // retryableError represents a request failure that can be retried.

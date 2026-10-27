@@ -4,6 +4,7 @@
 package otlploggrpc
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -86,14 +87,16 @@ type Option interface {
 }
 
 type config struct {
-	endpoint       setting[string]
-	insecure       setting[bool]
-	tlsCfg         setting[*tls.Config]
-	headers        setting[map[string]string]
-	compression    setting[Compression]
-	maxRequestSize setting[int]
-	timeout        setting[time.Duration]
-	retryCfg       setting[retry.Config]
+	endpoint                       setting[string]
+	insecure                       setting[bool]
+	tlsCfg                         setting[*tls.Config]
+	headers                        setting[map[string]string]
+	authenticatorPerRPCCredentials func() (credentials.PerRPCCredentials, error)
+	authenticatorShutdown          func(context.Context) error
+	compression                    setting[Compression]
+	maxRequestSize                 setting[int]
+	timeout                        setting[time.Duration]
+	retryCfg                       setting[retry.Config]
 
 	// gRPC configurations
 	gRPCCredentials    setting[credentials.TransportCredentials]
@@ -103,10 +106,27 @@ type config struct {
 	gRPCConn           setting[*grpc.ClientConn]
 }
 
+type experimentalOption interface {
+	Experimental()
+}
+
+type grpcAuthenticatorOption interface {
+	Experimental()
+	PerRPCCredentials() (credentials.PerRPCCredentials, error)
+	AuthenticatorShutdown(context.Context) error
+}
+
 func newConfig(options []Option) config {
 	var c config
 	for _, opt := range options {
-		c = opt.applyOption(c)
+		switch exp := opt.(type) {
+		case grpcAuthenticatorOption:
+			c.authenticatorPerRPCCredentials = exp.PerRPCCredentials
+			c.authenticatorShutdown = exp.AuthenticatorShutdown
+		case experimentalOption:
+		default:
+			c = opt.applyOption(c)
+		}
 	}
 
 	// Apply environment value and default value

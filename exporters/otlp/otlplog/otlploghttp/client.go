@@ -32,11 +32,19 @@ import (
 
 type client struct {
 	uploadLogs func(context.Context, []*logpb.ResourceLogs) error
+	shutdown   func(context.Context) error
 }
 
 func (c *client) UploadLogs(ctx context.Context, rl []*logpb.ResourceLogs) error {
 	if c.uploadLogs != nil {
 		return c.uploadLogs(ctx, rl)
+	}
+	return nil
+}
+
+func (c *client) Shutdown(ctx context.Context) error {
+	if c.shutdown != nil {
+		return c.shutdown(ctx)
 	}
 	return nil
 }
@@ -53,6 +61,17 @@ var errInsecureEndpointWithTLS = errors.New("insecure HTTP endpoint cannot use T
 func nextExporterID() int64 {
 	const inc = 1
 	return exporterN.Add(inc) - inc
+}
+
+type contextCheckRoundTripper struct {
+	base http.RoundTripper
+}
+
+func (rt contextCheckRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
+	return rt.base.RoundTrip(req)
 }
 
 // newHTTPClient creates a new HTTP log client.
@@ -84,6 +103,19 @@ func newHTTPClient(ctx context.Context, cfg config) (*client, error) {
 			}
 		}
 	}
+	if cfg.authenticatorRoundTripper != nil {
+		hcCopy := *hc
+		baseTransport := hcCopy.Transport
+		if baseTransport == nil {
+			baseTransport = ourTransport.Clone()
+		}
+		rt, err := cfg.authenticatorRoundTripper(contextCheckRoundTripper{base: baseTransport})
+		if err != nil {
+			return nil, err
+		}
+		hcCopy.Transport = rt
+		hc = &hcCopy
+	}
 
 	u := &url.URL{
 		Scheme:  "https",
@@ -111,32 +143,41 @@ func newHTTPClient(ctx context.Context, cfg config) (*client, error) {
 	req.Header.Set("Content-Type", "application/x-protobuf")
 
 	c := &httpClient{
-		compression:     cfg.compression.Value,
-		maxRequestSize:  cfg.maxRequestSize.Value,
-		maxResponseSize: cfg.maxResponseSize.Value,
-		req:             req,
-		requestFunc:     cfg.retryCfg.Value.RequestFunc(evaluate),
-		client:          hc,
-		exportTimeout:   exportTimeout,
+		compression:           cfg.compression.Value,
+		maxRequestSize:        cfg.maxRequestSize.Value,
+		maxResponseSize:       cfg.maxResponseSize.Value,
+		req:                   req,
+		requestFunc:           cfg.retryCfg.Value.RequestFunc(evaluate),
+		client:                hc,
+		exportTimeout:         exportTimeout,
+		authenticatorShutdown: cfg.authenticatorShutdown,
 	}
 
 	id := nextExporterID()
 	c.inst, err = observ.NewInstrumentation(id, cfg.endpoint.Value)
 
-	return &client{uploadLogs: c.uploadLogs}, err
+	return &client{uploadLogs: c.uploadLogs, shutdown: c.shutdown}, err
 }
 
 type httpClient struct {
 	// req is cloned for every upload the client makes.
-	req             *http.Request
-	compression     Compression
-	maxRequestSize  int
-	maxResponseSize int64
-	requestFunc     retry.RequestFunc
-	client          *http.Client
-	exportTimeout   time.Duration
+	req                   *http.Request
+	compression           Compression
+	maxRequestSize        int
+	maxResponseSize       int64
+	requestFunc           retry.RequestFunc
+	client                *http.Client
+	exportTimeout         time.Duration
+	authenticatorShutdown func(context.Context) error
 
 	inst *observ.Instrumentation
+}
+
+func (c *httpClient) shutdown(ctx context.Context) error {
+	if c.authenticatorShutdown != nil {
+		return c.authenticatorShutdown(ctx)
+	}
+	return nil
 }
 
 // Keep it in sync with Go's DefaultTransport from net/http! We
@@ -327,6 +368,7 @@ func (c *httpClient) newRequest(ctx context.Context, body []byte) (request, erro
 		req.GetBody = bodyReaderErr(b.Bytes())
 	}
 
+	req.baseHeader = r.Header.Clone()
 	return req, nil
 }
 
@@ -348,6 +390,7 @@ func bodyReaderErr(buf []byte) func() (io.ReadCloser, error) {
 type request struct {
 	*http.Request
 
+	baseHeader http.Header
 	// bodyReader allows the same body to be used for multiple requests.
 	bodyReader func() io.ReadCloser
 }
@@ -356,6 +399,9 @@ type request struct {
 func (r *request) reset(ctx context.Context) {
 	r.Body = r.bodyReader()
 	r.Request = r.WithContext(ctx)
+	if r.baseHeader != nil {
+		r.Header = r.baseHeader.Clone()
+	}
 }
 
 // retryableError represents a request failure that can be retried.

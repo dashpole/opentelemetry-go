@@ -4,6 +4,7 @@
 package otlptracehttp
 
 import (
+	"context"
 	"crypto/tls"
 	"net/http"
 	"net/url"
@@ -46,10 +47,26 @@ type Option interface {
 	applyHTTPOption(otlpconfig.Config) otlpconfig.Config
 }
 
+type experimentalOption interface {
+	Experimental()
+}
+
+type httpAuthenticatorOption interface {
+	Experimental()
+	RoundTripper(http.RoundTripper) (http.RoundTripper, error)
+	AuthenticatorShutdown(context.Context) error
+}
+
 func asHTTPOptions(opts []Option) []otlpconfig.HTTPOption {
-	converted := make([]otlpconfig.HTTPOption, len(opts))
-	for i, o := range opts {
-		converted[i] = otlpconfig.NewHTTPOption(o.applyHTTPOption)
+	converted := make([]otlpconfig.HTTPOption, 0, len(opts))
+	for _, o := range opts {
+		switch exp := o.(type) {
+		case httpAuthenticatorOption:
+			converted = append(converted, otlpconfig.WithHTTPAuthenticator(exp.RoundTripper, exp.AuthenticatorShutdown))
+		case experimentalOption:
+		default:
+			converted = append(converted, otlpconfig.NewHTTPOption(o.applyHTTPOption))
+		}
 	}
 	return converted
 }

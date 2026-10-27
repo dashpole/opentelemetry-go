@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	colmetricpb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
@@ -14,6 +15,7 @@ import (
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -24,10 +26,13 @@ import (
 )
 
 type client struct {
-	metadata       metadata.MD
-	exportTimeout  time.Duration
-	maxRequestSize int
-	requestFunc    retry.RequestFunc
+	endpoint              string
+	metadata              metadata.MD
+	authenticatorShutdown func(context.Context) error
+	callOpts              []grpc.CallOption
+	exportTimeout         time.Duration
+	maxRequestSize        int
+	requestFunc           retry.RequestFunc
 
 	// ourConn keeps track of where conn was created: true if created here in
 	// NewClient, or false if passed with an option. This is important on
@@ -41,14 +46,30 @@ type client struct {
 // newClient creates a new gRPC metric client.
 func newClient(_ context.Context, cfg oconf.Config) (*client, error) {
 	c := &client{
-		exportTimeout:  cfg.Metrics.Timeout,
-		maxRequestSize: cfg.Metrics.MaxRequestSize,
-		requestFunc:    cfg.RetryConfig.RequestFunc(retryable),
-		conn:           cfg.GRPCConn,
+		endpoint:              cfg.Metrics.Endpoint,
+		authenticatorShutdown: cfg.Metrics.AuthenticatorShutdown,
+		exportTimeout:         cfg.Metrics.Timeout,
+		maxRequestSize:        cfg.Metrics.MaxRequestSize,
+		requestFunc:           cfg.RetryConfig.RequestFunc(retryable),
+		conn:                  cfg.GRPCConn,
 	}
 
 	if len(cfg.Metrics.Headers) > 0 {
 		c.metadata = metadata.New(cfg.Metrics.Headers)
+	}
+	if cfg.Metrics.AuthenticatorPerRPCCredentials != nil {
+		creds, err := cfg.Metrics.AuthenticatorPerRPCCredentials()
+		if err != nil {
+			return nil, err
+		}
+		if creds != nil {
+			c.callOpts = []grpc.CallOption{
+				grpc.PerRPCCredentials(mergedPerRPCCredentials{
+					base:     creds,
+					staticMD: c.metadata,
+				}),
+			}
+		}
 	}
 
 	if c.conn == nil {
@@ -96,8 +117,65 @@ func (c *client) Shutdown(ctx context.Context) error {
 			err = closeErr
 		}
 	}
+	if c.authenticatorShutdown != nil {
+		authErr := c.authenticatorShutdown(ctx)
+		if err == nil && authErr != nil {
+			err = authErr
+		}
+		c.authenticatorShutdown = nil
+	}
+	c.callOpts = nil
 	c.conn = nil
 	return err
+}
+
+type nonRetryableAuthError struct {
+	err error
+}
+
+func (e nonRetryableAuthError) Error() string {
+	return fmt.Sprintf("failed to authenticate request: %v", e.err)
+}
+
+func (e nonRetryableAuthError) Unwrap() error {
+	return e.err
+}
+
+type mergedPerRPCCredentials struct {
+	base     credentials.PerRPCCredentials
+	staticMD metadata.MD
+}
+
+func (m mergedPerRPCCredentials) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+	dyn, err := m.base.GetRequestMetadata(ctx, uri...)
+	if err != nil {
+		return nil, nonRetryableAuthError{err: err}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nonRetryableAuthError{err: err}
+	}
+	if len(m.staticMD) == 0 && len(dyn) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(m.staticMD)+len(dyn))
+	for k, vals := range m.staticMD {
+		if len(vals) > 0 {
+			out[strings.ToLower(k)] = vals[len(vals)-1]
+		}
+	}
+	for k, v := range dyn {
+		for existingKey := range out {
+			if strings.EqualFold(existingKey, k) {
+				delete(out, existingKey)
+			}
+		}
+		out[strings.ToLower(k)] = v
+	}
+	return out, nil
+}
+
+func (m mergedPerRPCCredentials) RequireTransportSecurity() bool {
+	return m.base.RequireTransportSecurity()
 }
 
 // UploadMetrics sends protoMetrics to connected endpoint.
@@ -127,7 +205,7 @@ func (c *client) UploadMetrics(ctx context.Context, protoMetrics *metricpb.Resou
 	}
 
 	return errors.Join(uploadErr, c.requestFunc(ctx, func(iCtx context.Context) error {
-		resp, err := c.msc.Export(iCtx, pbRequest)
+		resp, err := c.msc.Export(iCtx, pbRequest, c.callOpts...)
 		if resp != nil && resp.PartialSuccess != nil {
 			msg := resp.PartialSuccess.GetErrorMessage()
 			n := resp.PartialSuccess.GetRejectedDataPoints()
@@ -163,7 +241,7 @@ func (c *client) exportContext(parent context.Context) (context.Context, context
 		ctx, cancel = context.WithCancel(parent) //nolint:gosec  // cancel is handled by the caller.
 	}
 
-	if c.metadata.Len() > 0 {
+	if c.metadata.Len() > 0 && len(c.callOpts) == 0 {
 		md := c.metadata
 		if outMD, ok := metadata.FromOutgoingContext(ctx); ok {
 			md = metadata.Join(md, outMD)
@@ -178,6 +256,10 @@ func (c *client) exportContext(parent context.Context) (context.Context, context
 // retryable returns if err identifies a request that can be retried and a
 // duration to wait for if an explicit throttle time is included in err.
 func retryable(err error) (bool, time.Duration) {
+	var authErr nonRetryableAuthError
+	if errors.As(err, &authErr) {
+		return false, 0
+	}
 	s := status.Convert(err)
 	return retryableGRPCStatus(s)
 }

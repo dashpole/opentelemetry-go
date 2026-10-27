@@ -4,6 +4,7 @@
 package otlpmetrichttp
 
 import (
+	"context"
 	"crypto/tls"
 	"net/http"
 	"net/url"
@@ -37,10 +38,26 @@ type Option interface {
 	applyHTTPOption(oconf.Config) oconf.Config
 }
 
+type experimentalOption interface {
+	Experimental()
+}
+
+type httpAuthenticatorOption interface {
+	Experimental()
+	RoundTripper(http.RoundTripper) (http.RoundTripper, error)
+	AuthenticatorShutdown(context.Context) error
+}
+
 func asHTTPOptions(opts []Option) []oconf.HTTPOption {
-	converted := make([]oconf.HTTPOption, len(opts))
-	for i, o := range opts {
-		converted[i] = oconf.NewHTTPOption(o.applyHTTPOption)
+	converted := make([]oconf.HTTPOption, 0, len(opts))
+	for _, o := range opts {
+		switch exp := o.(type) {
+		case httpAuthenticatorOption:
+			converted = append(converted, oconf.WithHTTPAuthenticator(exp.RoundTripper, exp.AuthenticatorShutdown))
+		case experimentalOption:
+		default:
+			converted = append(converted, oconf.NewHTTPOption(o.applyHTTPOption))
+		}
 	}
 	return converted
 }

@@ -4,6 +4,7 @@
 package otlptracegrpc
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -20,10 +21,26 @@ type Option interface {
 	applyGRPCOption(otlpconfig.Config) otlpconfig.Config
 }
 
+type experimentalOption interface {
+	Experimental()
+}
+
+type grpcAuthenticatorOption interface {
+	Experimental()
+	PerRPCCredentials() (credentials.PerRPCCredentials, error)
+	AuthenticatorShutdown(context.Context) error
+}
+
 func asGRPCOptions(opts []Option) []otlpconfig.GRPCOption {
-	converted := make([]otlpconfig.GRPCOption, len(opts))
-	for i, o := range opts {
-		converted[i] = otlpconfig.NewGRPCOption(o.applyGRPCOption)
+	converted := make([]otlpconfig.GRPCOption, 0, len(opts))
+	for _, o := range opts {
+		switch exp := o.(type) {
+		case grpcAuthenticatorOption:
+			converted = append(converted, otlpconfig.WithGRPCAuthenticator(exp.PerRPCCredentials, exp.AuthenticatorShutdown))
+		case experimentalOption:
+		default:
+			converted = append(converted, otlpconfig.NewGRPCOption(o.applyGRPCOption))
+		}
 	}
 	return converted
 }

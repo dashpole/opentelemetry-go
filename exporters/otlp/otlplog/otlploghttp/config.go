@@ -4,6 +4,7 @@
 package otlploghttp
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -98,24 +99,43 @@ type endpointPath struct {
 }
 
 type config struct {
-	endpoint        setting[string]
-	path            setting[endpointPath]
-	insecure        setting[bool]
-	tlsCfg          setting[*tls.Config]
-	headers         setting[map[string]string]
-	compression     setting[Compression]
-	maxRequestSize  setting[int]
-	maxResponseSize setting[int64]
-	timeout         setting[time.Duration]
-	proxy           setting[HTTPTransportProxyFunc]
-	retryCfg        setting[retry.Config]
-	httpClient      *http.Client
+	endpoint                  setting[string]
+	path                      setting[endpointPath]
+	insecure                  setting[bool]
+	tlsCfg                    setting[*tls.Config]
+	headers                   setting[map[string]string]
+	authenticatorRoundTripper func(http.RoundTripper) (http.RoundTripper, error)
+	authenticatorShutdown     func(context.Context) error
+	compression               setting[Compression]
+	maxRequestSize            setting[int]
+	maxResponseSize           setting[int64]
+	timeout                   setting[time.Duration]
+	proxy                     setting[HTTPTransportProxyFunc]
+	retryCfg                  setting[retry.Config]
+	httpClient                *http.Client
+}
+
+type experimentalOption interface {
+	Experimental()
+}
+
+type httpAuthenticatorOption interface {
+	Experimental()
+	RoundTripper(http.RoundTripper) (http.RoundTripper, error)
+	AuthenticatorShutdown(context.Context) error
 }
 
 func newConfig(options []Option) config {
 	var c config
 	for _, opt := range options {
-		c = opt.applyHTTPOption(c)
+		switch exp := opt.(type) {
+		case httpAuthenticatorOption:
+			c.authenticatorRoundTripper = exp.RoundTripper
+			c.authenticatorShutdown = exp.AuthenticatorShutdown
+		case experimentalOption:
+		default:
+			c = opt.applyHTTPOption(c)
+		}
 	}
 
 	c.endpoint = c.endpoint.Resolve(

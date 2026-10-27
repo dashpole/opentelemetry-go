@@ -4,6 +4,7 @@
 package otlpmetricgrpc
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -21,10 +22,26 @@ type Option interface {
 	applyGRPCOption(oconf.Config) oconf.Config
 }
 
+type experimentalOption interface {
+	Experimental()
+}
+
+type grpcAuthenticatorOption interface {
+	Experimental()
+	PerRPCCredentials() (credentials.PerRPCCredentials, error)
+	AuthenticatorShutdown(context.Context) error
+}
+
 func asGRPCOptions(opts []Option) []oconf.GRPCOption {
-	converted := make([]oconf.GRPCOption, len(opts))
-	for i, o := range opts {
-		converted[i] = oconf.NewGRPCOption(o.applyGRPCOption)
+	converted := make([]oconf.GRPCOption, 0, len(opts))
+	for _, o := range opts {
+		switch exp := o.(type) {
+		case grpcAuthenticatorOption:
+			converted = append(converted, oconf.WithGRPCAuthenticator(exp.PerRPCCredentials, exp.AuthenticatorShutdown))
+		case experimentalOption:
+		default:
+			converted = append(converted, oconf.NewGRPCOption(o.applyGRPCOption))
+		}
 	}
 	return converted
 }

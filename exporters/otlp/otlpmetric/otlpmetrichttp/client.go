@@ -32,15 +32,27 @@ import (
 
 type client struct {
 	// req is cloned for every upload the client makes.
-	req             *http.Request
-	compression     Compression
-	maxRequestSize  int
-	maxResponseSize int64
-	requestFunc     retry.RequestFunc
-	httpClient      *http.Client
-	exportTimeout   time.Duration
+	req                   *http.Request
+	compression           Compression
+	maxRequestSize        int
+	maxResponseSize       int64
+	requestFunc           retry.RequestFunc
+	httpClient            *http.Client
+	exportTimeout         time.Duration
+	authenticatorShutdown func(context.Context) error
 
 	inst *observ.Instrumentation
+}
+
+type contextCheckRoundTripper struct {
+	base http.RoundTripper
+}
+
+func (rt contextCheckRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
+	return rt.base.RoundTrip(req)
 }
 
 // Keep it in sync with golang's DefaultTransport from net/http! We
@@ -91,6 +103,19 @@ func newClient(cfg oconf.Config) (*client, error) {
 			}
 		}
 	}
+	if cfg.Metrics.AuthenticatorRoundTripper != nil {
+		hcCopy := *httpClient
+		baseTransport := hcCopy.Transport
+		if baseTransport == nil {
+			baseTransport = ourTransport.Clone()
+		}
+		rt, err := cfg.Metrics.AuthenticatorRoundTripper(contextCheckRoundTripper{base: baseTransport})
+		if err != nil {
+			return nil, err
+		}
+		hcCopy.Transport = rt
+		httpClient = &hcCopy
+	}
 
 	u := &url.URL{
 		Scheme:  "https",
@@ -121,14 +146,15 @@ func newClient(cfg oconf.Config) (*client, error) {
 	inst, err := observ.NewInstrumentation(counter.NextExporterID(), cfg.Metrics.Endpoint)
 
 	return &client{
-		compression:     Compression(cfg.Metrics.Compression),
-		maxRequestSize:  cfg.Metrics.MaxRequestSize,
-		maxResponseSize: cfg.Metrics.MaxResponseSize,
-		req:             req,
-		requestFunc:     cfg.RetryConfig.RequestFunc(evaluate),
-		httpClient:      httpClient,
-		exportTimeout:   exportTimeout,
-		inst:            inst,
+		compression:           Compression(cfg.Metrics.Compression),
+		maxRequestSize:        cfg.Metrics.MaxRequestSize,
+		maxResponseSize:       cfg.Metrics.MaxResponseSize,
+		req:                   req,
+		requestFunc:           cfg.RetryConfig.RequestFunc(evaluate),
+		httpClient:            httpClient,
+		exportTimeout:         exportTimeout,
+		authenticatorShutdown: cfg.Metrics.AuthenticatorShutdown,
+		inst:                  inst,
 	}, err
 }
 
@@ -140,7 +166,15 @@ func (c *client) Shutdown(ctx context.Context) error {
 
 	c.requestFunc = nil
 	c.httpClient = nil
-	return ctx.Err()
+	err := ctx.Err()
+	if c.authenticatorShutdown != nil {
+		authErr := c.authenticatorShutdown(ctx)
+		if err == nil && authErr != nil {
+			err = authErr
+		}
+		c.authenticatorShutdown = nil
+	}
+	return err
 }
 
 // UploadMetrics sends protoMetrics to the connected endpoint.
@@ -309,6 +343,7 @@ func (c *client) newRequest(ctx context.Context, body []byte) (request, error) {
 		req.GetBody = bodyReaderErr(b.Bytes())
 	}
 
+	req.baseHeader = r.Header.Clone()
 	return req, nil
 }
 
@@ -330,6 +365,7 @@ func bodyReaderErr(buf []byte) func() (io.ReadCloser, error) {
 type request struct {
 	*http.Request
 
+	baseHeader http.Header
 	// bodyReader allows the same body to be used for multiple requests.
 	bodyReader func() io.ReadCloser
 }
@@ -338,6 +374,9 @@ type request struct {
 func (r *request) reset(ctx context.Context) {
 	r.Body = r.bodyReader()
 	r.Request = r.WithContext(ctx)
+	if r.baseHeader != nil {
+		r.Header = r.baseHeader.Clone()
+	}
 }
 
 // retryableError represents a request failure that can be retried.

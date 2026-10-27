@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -28,12 +30,15 @@ import (
 )
 
 type client struct {
-	endpoint       string
-	dialOpts       []grpc.DialOption
-	metadata       metadata.MD
-	exportTimeout  time.Duration
-	maxRequestSize int
-	requestFunc    retry.RequestFunc
+	endpoint                       string
+	dialOpts                       []grpc.DialOption
+	metadata                       metadata.MD
+	authenticatorPerRPCCredentials func() (credentials.PerRPCCredentials, error)
+	authenticatorShutdown          func(context.Context) error
+	callOpts                       []grpc.CallOption
+	exportTimeout                  time.Duration
+	maxRequestSize                 int
+	requestFunc                    retry.RequestFunc
 
 	// stopCtx is used as a parent context for all exports. Therefore, when it
 	// is canceled with the stopFunc all exports are canceled.
@@ -68,15 +73,17 @@ func newClient(opts ...Option) *client {
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec  // cancel called in client shutdown.
 
 	c := &client{
-		endpoint:       cfg.Traces.Endpoint,
-		exportTimeout:  cfg.Traces.Timeout,
-		maxRequestSize: cfg.Traces.MaxRequestSize,
-		requestFunc:    cfg.RetryConfig.RequestFunc(retryable),
-		dialOpts:       cfg.DialOptions,
-		stopCtx:        ctx,
-		stopFunc:       cancel,
-		conn:           cfg.GRPCConn,
-		instID:         counter.NextExporterID(),
+		endpoint:                       cfg.Traces.Endpoint,
+		authenticatorPerRPCCredentials: cfg.Traces.AuthenticatorPerRPCCredentials,
+		authenticatorShutdown:          cfg.Traces.AuthenticatorShutdown,
+		exportTimeout:                  cfg.Traces.Timeout,
+		maxRequestSize:                 cfg.Traces.MaxRequestSize,
+		requestFunc:                    cfg.RetryConfig.RequestFunc(retryable),
+		dialOpts:                       cfg.DialOptions,
+		stopCtx:                        ctx,
+		stopFunc:                       cancel,
+		conn:                           cfg.GRPCConn,
+		instID:                         counter.NextExporterID(),
 	}
 
 	if len(cfg.Traces.Headers) > 0 {
@@ -88,6 +95,20 @@ func newClient(opts ...Option) *client {
 
 // Start establishes a gRPC connection to the collector.
 func (c *client) Start(context.Context) error {
+	if c.authenticatorPerRPCCredentials != nil {
+		creds, err := c.authenticatorPerRPCCredentials()
+		if err != nil {
+			return err
+		}
+		if creds != nil {
+			c.callOpts = []grpc.CallOption{
+				grpc.PerRPCCredentials(mergedPerRPCCredentials{
+					base:     creds,
+					staticMD: c.metadata,
+				}),
+			}
+		}
+	}
 	if c.conn == nil {
 		// If the caller did not provide a ClientConn when the client was
 		// created, create one using the configuration they did provide.
@@ -185,7 +206,65 @@ func (c *client) Stop(ctx context.Context) error {
 			err = closeErr
 		}
 	}
+	if c.authenticatorShutdown != nil {
+		authErr := c.authenticatorShutdown(ctx)
+		if err == nil && authErr != nil {
+			err = authErr
+		}
+		c.authenticatorShutdown = nil
+	}
+	c.authenticatorPerRPCCredentials = nil
+	c.callOpts = nil
 	return err
+}
+
+type nonRetryableAuthError struct {
+	err error
+}
+
+func (e nonRetryableAuthError) Error() string {
+	return fmt.Sprintf("failed to authenticate request: %v", e.err)
+}
+
+func (e nonRetryableAuthError) Unwrap() error {
+	return e.err
+}
+
+type mergedPerRPCCredentials struct {
+	base     credentials.PerRPCCredentials
+	staticMD metadata.MD
+}
+
+func (m mergedPerRPCCredentials) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+	dyn, err := m.base.GetRequestMetadata(ctx, uri...)
+	if err != nil {
+		return nil, nonRetryableAuthError{err: err}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nonRetryableAuthError{err: err}
+	}
+	if len(m.staticMD) == 0 && len(dyn) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(m.staticMD)+len(dyn))
+	for k, vals := range m.staticMD {
+		if len(vals) > 0 {
+			out[strings.ToLower(k)] = vals[len(vals)-1]
+		}
+	}
+	for k, v := range dyn {
+		for existingKey := range out {
+			if strings.EqualFold(existingKey, k) {
+				delete(out, existingKey)
+			}
+		}
+		out[strings.ToLower(k)] = v
+	}
+	return out, nil
+}
+
+func (m mergedPerRPCCredentials) RequireTransportSecurity() bool {
+	return m.base.RequireTransportSecurity()
 }
 
 var errShutdown = errors.New("the client is shutdown")
@@ -230,7 +309,8 @@ func (c *client) UploadTraces(ctx context.Context, protoSpans []*tracepb.Resourc
 	}
 
 	return c.requestFunc(ctx, func(iCtx context.Context) error {
-		resp, err := c.tsc.Export(iCtx, pbRequest)
+		code = codes.Unknown
+		resp, err := c.tsc.Export(iCtx, pbRequest, c.callOpts...)
 		if resp != nil && resp.PartialSuccess != nil {
 			msg := resp.PartialSuccess.GetErrorMessage()
 			n := resp.PartialSuccess.GetRejectedSpans()
@@ -267,7 +347,7 @@ func (c *client) exportContext(parent context.Context) (context.Context, context
 		ctx, cancel = context.WithCancel(parent) //nolint:gosec  // cancel called by caller when export is complete.
 	}
 
-	if c.metadata.Len() > 0 {
+	if c.metadata.Len() > 0 && len(c.callOpts) == 0 {
 		md := c.metadata
 		if outMD, ok := metadata.FromOutgoingContext(ctx); ok {
 			md = metadata.Join(md, outMD)
@@ -292,6 +372,10 @@ func (c *client) exportContext(parent context.Context) (context.Context, context
 // retryable returns if err identifies a request that can be retried and a
 // duration to wait for if an explicit throttle time is included in err.
 func retryable(err error) (bool, time.Duration) {
+	var authErr nonRetryableAuthError
+	if errors.As(err, &authErr) {
+		return false, 0
+	}
 	s := status.Convert(err)
 	return retryableGRPCStatus(s)
 }

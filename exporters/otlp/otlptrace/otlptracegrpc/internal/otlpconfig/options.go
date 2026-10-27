@@ -8,6 +8,7 @@
 package otlpconfig
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net/http"
@@ -63,6 +64,10 @@ type (
 		// HTTP configurations
 		Proxy      HTTPTransportProxyFunc
 		HTTPClient *http.Client
+
+		AuthenticatorRoundTripper      func(http.RoundTripper) (http.RoundTripper, error)
+		AuthenticatorPerRPCCredentials func() (credentials.PerRPCCredentials, error)
+		AuthenticatorShutdown          func(context.Context) error
 	}
 
 	// Config holds the configuration for an otlptrace exporter.
@@ -372,6 +377,32 @@ func WithSecure() GenericOption {
 func WithHeaders(headers map[string]string) GenericOption {
 	return newGenericOption(func(cfg Config) Config {
 		cfg.Traces.Headers = headers
+		return cfg
+	})
+}
+
+// WithHTTPAuthenticator configures dynamic HTTP RoundTripper wrapping and
+// shutdown hooks for outgoing HTTP export requests.
+func WithHTTPAuthenticator(
+	rt func(http.RoundTripper) (http.RoundTripper, error),
+	shutdown func(context.Context) error,
+) HTTPOption {
+	return NewHTTPOption(func(cfg Config) Config {
+		cfg.Traces.AuthenticatorRoundTripper = rt
+		cfg.Traces.AuthenticatorShutdown = shutdown
+		return cfg
+	})
+}
+
+// WithGRPCAuthenticator configures dynamic gRPC PerRPCCredentials and shutdown
+// hooks for outgoing gRPC export requests.
+func WithGRPCAuthenticator(
+	creds func() (credentials.PerRPCCredentials, error),
+	shutdown func(context.Context) error,
+) GRPCOption {
+	return NewGRPCOption(func(cfg Config) Config {
+		cfg.Traces.AuthenticatorPerRPCCredentials = creds
+		cfg.Traces.AuthenticatorShutdown = shutdown
 		return cfg
 	})
 }

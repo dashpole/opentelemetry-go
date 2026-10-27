@@ -71,12 +71,15 @@ func (e *Exporter) Export(ctx context.Context, records []log.Record) error {
 // return nil.
 //
 // This method is safe to call concurrently.
-func (e *Exporter) Shutdown(context.Context) error {
+func (e *Exporter) Shutdown(ctx context.Context) error {
 	if e.stopped.Swap(true) {
 		return nil
 	}
 
-	e.client.Store(newNoopClient())
+	c := e.client.Swap(newNoopClient())
+	if c != nil {
+		return c.Shutdown(ctx)
+	}
 	return nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -30,10 +31,13 @@ import (
 
 // The methods of this type are not expected to be called concurrently.
 type client struct {
-	metadata       metadata.MD
-	exportTimeout  time.Duration
-	maxRequestSize int
-	requestFunc    retry.RequestFunc
+	endpoint              string
+	metadata              metadata.MD
+	authenticatorShutdown func(context.Context) error
+	callOpts              []grpc.CallOption
+	exportTimeout         time.Duration
+	maxRequestSize        int
+	requestFunc           retry.RequestFunc
 
 	// ourConn keeps track of where conn was created: true if created here in
 	// NewClient, or false if passed with an option. This is important during
@@ -52,14 +56,30 @@ var newGRPCClientFn = grpc.NewClient
 // newClient creates a new gRPC log client.
 func newClient(cfg config) (*client, error) {
 	c := &client{
-		exportTimeout:  cfg.timeout.Value,
-		maxRequestSize: cfg.maxRequestSize.Value,
-		requestFunc:    cfg.retryCfg.Value.RequestFunc(retryable),
-		conn:           cfg.gRPCConn.Value,
+		endpoint:              cfg.endpoint.Value,
+		authenticatorShutdown: cfg.authenticatorShutdown,
+		exportTimeout:         cfg.timeout.Value,
+		maxRequestSize:        cfg.maxRequestSize.Value,
+		requestFunc:           cfg.retryCfg.Value.RequestFunc(retryable),
+		conn:                  cfg.gRPCConn.Value,
 	}
 
 	if len(cfg.headers.Value) > 0 {
 		c.metadata = metadata.New(cfg.headers.Value)
+	}
+	if cfg.authenticatorPerRPCCredentials != nil {
+		creds, err := cfg.authenticatorPerRPCCredentials()
+		if err != nil {
+			return nil, err
+		}
+		if creds != nil {
+			c.callOpts = []grpc.CallOption{
+				grpc.PerRPCCredentials(mergedPerRPCCredentials{
+					base:     creds,
+					staticMD: c.metadata,
+				}),
+			}
+		}
 	}
 
 	if c.conn == nil {
@@ -173,7 +193,7 @@ func (c *client) UploadLogs(ctx context.Context, rl []*logpb.ResourceLogs) (uplo
 	}
 
 	return errors.Join(uploadErr, c.requestFunc(ctx, func(ctx context.Context) error {
-		resp, err := c.lsc.Export(ctx, pbRequest)
+		resp, err := c.lsc.Export(ctx, pbRequest, c.callOpts...)
 		if resp != nil && resp.PartialSuccess != nil {
 			msg := resp.PartialSuccess.GetErrorMessage()
 			n := resp.PartialSuccess.GetRejectedLogRecords()
@@ -215,8 +235,65 @@ func (c *client) Shutdown(ctx context.Context) error {
 			err = closeErr
 		}
 	}
+	if c.authenticatorShutdown != nil {
+		authErr := c.authenticatorShutdown(ctx)
+		if err == nil && authErr != nil {
+			err = authErr
+		}
+		c.authenticatorShutdown = nil
+	}
+	c.callOpts = nil
 	c.conn = nil
 	return err
+}
+
+type nonRetryableAuthError struct {
+	err error
+}
+
+func (e nonRetryableAuthError) Error() string {
+	return fmt.Sprintf("failed to authenticate request: %v", e.err)
+}
+
+func (e nonRetryableAuthError) Unwrap() error {
+	return e.err
+}
+
+type mergedPerRPCCredentials struct {
+	base     credentials.PerRPCCredentials
+	staticMD metadata.MD
+}
+
+func (m mergedPerRPCCredentials) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+	dyn, err := m.base.GetRequestMetadata(ctx, uri...)
+	if err != nil {
+		return nil, nonRetryableAuthError{err: err}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nonRetryableAuthError{err: err}
+	}
+	if len(m.staticMD) == 0 && len(dyn) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(m.staticMD)+len(dyn))
+	for k, vals := range m.staticMD {
+		if len(vals) > 0 {
+			out[strings.ToLower(k)] = vals[len(vals)-1]
+		}
+	}
+	for k, v := range dyn {
+		for existingKey := range out {
+			if strings.EqualFold(existingKey, k) {
+				delete(out, existingKey)
+			}
+		}
+		out[strings.ToLower(k)] = v
+	}
+	return out, nil
+}
+
+func (m mergedPerRPCCredentials) RequireTransportSecurity() bool {
+	return m.base.RequireTransportSecurity()
 }
 
 // exportContext returns a copy of parent with an appropriate deadline and
@@ -237,7 +314,7 @@ func (c *client) exportContext(parent context.Context) (context.Context, context
 		ctx, cancel = context.WithCancel(parent) //nolint:gosec  // cancel is handled by caller.
 	}
 
-	if c.metadata.Len() > 0 {
+	if c.metadata.Len() > 0 && len(c.callOpts) == 0 {
 		md := c.metadata
 		if outMD, ok := metadata.FromOutgoingContext(ctx); ok {
 			md = metadata.Join(md, outMD)
@@ -262,6 +339,10 @@ func (*noopClient) Shutdown(context.Context) error { return nil }
 // retryable reports whether err identifies a request that can be retried and
 // returns a duration to wait if an explicit throttle time is included in err.
 func retryable(err error) (bool, time.Duration) {
+	var authErr nonRetryableAuthError
+	if errors.As(err, &authErr) {
+		return false, 0
+	}
 	s := status.Convert(err)
 	return retryableGRPCStatus(s)
 }
