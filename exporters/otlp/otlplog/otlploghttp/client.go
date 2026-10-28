@@ -63,17 +63,6 @@ func nextExporterID() int64 {
 	return exporterN.Add(inc) - inc
 }
 
-type contextCheckRoundTripper struct {
-	base http.RoundTripper
-}
-
-func (rt contextCheckRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if err := req.Context().Err(); err != nil {
-		return nil, err
-	}
-	return rt.base.RoundTrip(req)
-}
-
 // newHTTPClient creates a new HTTP log client.
 func newHTTPClient(ctx context.Context, cfg config) (*client, error) {
 	if cfg.insecure.Value && cfg.tlsCfg.Value != nil {
@@ -109,7 +98,7 @@ func newHTTPClient(ctx context.Context, cfg config) (*client, error) {
 		if baseTransport == nil {
 			baseTransport = ourTransport.Clone()
 		}
-		rt, err := cfg.authenticatorRoundTripper(contextCheckRoundTripper{base: baseTransport})
+		rt, err := cfg.authenticatorRoundTripper(baseTransport)
 		if err != nil {
 			return nil, err
 		}
@@ -368,7 +357,6 @@ func (c *httpClient) newRequest(ctx context.Context, body []byte) (request, erro
 		req.GetBody = bodyReaderErr(b.Bytes())
 	}
 
-	req.baseHeader = r.Header.Clone()
 	return req, nil
 }
 
@@ -390,7 +378,6 @@ func bodyReaderErr(buf []byte) func() (io.ReadCloser, error) {
 type request struct {
 	*http.Request
 
-	baseHeader http.Header
 	// bodyReader allows the same body to be used for multiple requests.
 	bodyReader func() io.ReadCloser
 }
@@ -399,9 +386,6 @@ type request struct {
 func (r *request) reset(ctx context.Context) {
 	r.Body = r.bodyReader()
 	r.Request = r.WithContext(ctx)
-	if r.baseHeader != nil {
-		r.Header = r.baseHeader.Clone()
-	}
 }
 
 // retryableError represents a request failure that can be retried.

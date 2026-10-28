@@ -24,7 +24,6 @@ import (
 )
 
 type client struct {
-	endpoint              string
 	metadata              metadata.MD
 	authenticatorShutdown func(context.Context) error
 	callOpts              []grpc.CallOption
@@ -44,7 +43,6 @@ type client struct {
 // newClient creates a new gRPC metric client.
 func newClient(_ context.Context, cfg oconf.Config) (*client, error) {
 	c := &client{
-		endpoint:              cfg.Metrics.Endpoint,
 		authenticatorShutdown: cfg.Metrics.AuthenticatorShutdown,
 		exportTimeout:         cfg.Metrics.Timeout,
 		maxRequestSize:        cfg.Metrics.MaxRequestSize,

@@ -75,21 +75,21 @@ func TestOAuth2TokenCachingAndRefresh(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. Initial call fetches token-1.
-	hdrs, err := auth.Headers(ctx)
+	hdrs, err := auth.headers(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{"Authorization": "Bearer token-1"}, hdrs)
 	assert.Equal(t, int32(1), tokenCalls.Load())
 
 	// 2. Subsequent call within validity window (e.g. +60s < 120s-30s) uses cached token.
 	advanceClock(60 * time.Second)
-	hdrs, err = auth.Headers(ctx)
+	hdrs, err = auth.headers(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{"Authorization": "Bearer token-1"}, hdrs)
 	assert.Equal(t, int32(1), tokenCalls.Load())
 
 	// 3. Advance clock into expiry skew window (+35s -> 95s >= 90s); triggers refresh to token-2.
 	advanceClock(35 * time.Second)
-	hdrs, err = auth.Headers(ctx)
+	hdrs, err = auth.headers(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{"Authorization": "Bearer token-2"}, hdrs)
 	assert.Equal(t, int32(2), tokenCalls.Load())
@@ -97,7 +97,7 @@ func TestOAuth2TokenCachingAndRefresh(t *testing.T) {
 	// 4. Shutdown is idempotent and prevents further token resolution.
 	require.NoError(t, auth.Shutdown(ctx))
 	require.NoError(t, auth.Shutdown(ctx))
-	_, err = auth.Headers(ctx)
+	_, err = auth.headers(ctx)
 	assert.ErrorIs(t, err, ErrShutdown)
 }
 
@@ -125,7 +125,7 @@ func TestOAuth2ConcurrentAccessAndContextCancellation(t *testing.T) {
 	// Cancelled context must fail immediately without making a network request.
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err = auth.Headers(cancelCtx)
+	_, err = auth.headers(cancelCtx)
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, int32(0), tokenCalls.Load())
 
@@ -136,7 +136,7 @@ func TestOAuth2ConcurrentAccessAndContextCancellation(t *testing.T) {
 	for range goroutines {
 		go func() {
 			defer wg.Done()
-			h, hErr := auth.Headers(context.Background())
+			h, hErr := auth.headers(context.Background())
 			assert.NoError(t, hErr)
 			assert.Equal(t, "Bearer concurrent-token", h["Authorization"])
 		}()

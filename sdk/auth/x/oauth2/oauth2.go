@@ -32,7 +32,7 @@ const (
 	maxTokenResponseBytes = 1 << 20 // 1 MiB
 )
 
-// ErrShutdown is returned by [Authenticator.Headers] after [Authenticator.Shutdown]
+// ErrShutdown is returned by an [Authenticator] after [Authenticator.Shutdown]
 // has been called.
 var ErrShutdown = errors.New("oauth2 authenticator is shut down")
 
@@ -69,11 +69,6 @@ type Option interface {
 type optionFunc func(options) options
 
 func (f optionFunc) apply(o options) options { return f(o) }
-
-// WithScopes configures the OAuth 2.0 scopes requested from the token endpoint.
-func WithScopes(scopes ...string) Option {
-	return scopesOption{scopes: scopes}
-}
 
 // WithHTTPClient configures a custom [http.Client] used to communicate with
 // the OAuth 2.0 token endpoint.
@@ -118,26 +113,6 @@ type Authenticator struct {
 
 var _ x.Authenticator = (*Authenticator)(nil)
 
-// OptionWithScopes returns an [Option] that overrides the scopes in [Config].
-type scopesOption struct {
-	scopes []string
-}
-
-func (s scopesOption) apply(o options) options { return o }
-
-// WithAudience returns an [Option] that sets the audience in [Config].
-type audienceOption struct {
-	audience string
-}
-
-func (a audienceOption) apply(o options) options { return o }
-
-// WithAudience configures the target audience parameter included in token
-// requests.
-func WithAudience(audience string) Option {
-	return audienceOption{audience: audience}
-}
-
 // New creates a new OAuth 2.0 Client Credentials [Authenticator].
 //
 // It returns an error if TokenURL, ClientID, or ClientSecret are empty or if
@@ -151,14 +126,7 @@ func New(cfg Config, opts ...Option) (*Authenticator, error) {
 		if opt == nil {
 			continue
 		}
-		switch v := opt.(type) {
-		case scopesOption:
-			cfg.Scopes = append([]string(nil), v.scopes...)
-		case audienceOption:
-			cfg.Audience = v.audience
-		default:
-			o = opt.apply(o)
-		}
+		o = opt.apply(o)
 	}
 
 	if strings.TrimSpace(cfg.TokenURL) == "" {
@@ -198,10 +166,7 @@ func New(cfg Config, opts ...Option) (*Authenticator, error) {
 	}, nil
 }
 
-// Headers returns map[string]string{"Authorization": "Bearer <token>"},
-// fetching or refreshing the OAuth 2.0 access token when none is cached or the
-// cached token has expired.
-func (a *Authenticator) Headers(ctx context.Context) (map[string]string, error) {
+func (a *Authenticator) headers(ctx context.Context) (map[string]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -239,13 +204,13 @@ func (a *Authenticator) Headers(ctx context.Context) (map[string]string, error) 
 // RoundTripper wraps base with an [http.RoundTripper] that attaches the OAuth
 // 2.0 Bearer token to each outgoing HTTP export request attempt.
 func (a *Authenticator) RoundTripper(base http.RoundTripper) (http.RoundTripper, error) {
-	return x.NewHeaders(a.Headers).RoundTripper(base)
+	return x.NewHeaders(a.headers).RoundTripper(base)
 }
 
 // PerRPCCredentials returns a [credentials.PerRPCCredentials] that attaches
 // the OAuth 2.0 Bearer token to each outgoing gRPC export RPC attempt.
 func (a *Authenticator) PerRPCCredentials() (credentials.PerRPCCredentials, error) {
-	return x.NewHeaders(a.Headers).PerRPCCredentials()
+	return x.NewHeaders(a.headers).PerRPCCredentials()
 }
 
 type tokenResponse struct {

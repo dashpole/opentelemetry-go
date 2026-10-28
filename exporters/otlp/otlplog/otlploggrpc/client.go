@@ -30,7 +30,6 @@ import (
 
 // The methods of this type are not expected to be called concurrently.
 type client struct {
-	endpoint              string
 	metadata              metadata.MD
 	authenticatorShutdown func(context.Context) error
 	callOpts              []grpc.CallOption
@@ -55,7 +54,6 @@ var newGRPCClientFn = grpc.NewClient
 // newClient creates a new gRPC log client.
 func newClient(cfg config) (*client, error) {
 	c := &client{
-		endpoint:              cfg.endpoint.Value,
 		authenticatorShutdown: cfg.authenticatorShutdown,
 		exportTimeout:         cfg.timeout.Value,
 		maxRequestSize:        cfg.maxRequestSize.Value,

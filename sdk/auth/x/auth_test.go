@@ -35,43 +35,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
-func TestMergeHeadersCaseInsensitivePrecedence(t *testing.T) {
-	static := map[string]string{
-		"authorization": "Bearer static-token",
-		"X-Static-Only": "static-val",
-	}
-	dynamic := map[string]string{
-		"Authorization":  "Bearer dynamic-token",
-		"X-Dynamic-Only": "dynamic-val",
-	}
-
-	merged := authx.MergeHeaders(static, dynamic)
-	assert.Equal(t, map[string]string{
-		"Authorization":  "Bearer dynamic-token",
-		"X-Static-Only":  "static-val",
-		"X-Dynamic-Only": "dynamic-val",
-	}, merged)
-
-	// Verify static map was not mutated.
-	assert.Equal(t, "Bearer static-token", static["authorization"])
-}
-
-func TestApplyHTTPHeadersCaseInsensitivePrecedence(t *testing.T) {
-	h := make(http.Header)
-	h.Set("authorization", "Bearer static-token")
-	h.Set("X-Tenant", "tenant-a")
-
-	authx.ApplyHTTPHeaders(h, map[string]string{
-		"Authorization": "Bearer dynamic-token",
-		"X-Extra":       "extra-val",
-	})
-
-	assert.Equal(t, "Bearer dynamic-token", h.Get("Authorization"))
-	assert.Len(t, h.Values("Authorization"), 1)
-	assert.Equal(t, "tenant-a", h.Get("X-Tenant"))
-	assert.Equal(t, "extra-val", h.Get("X-Extra"))
-}
-
 type grpcCollector struct {
 	coltracepb.UnimplementedTraceServiceServer
 	colmetricpb.UnimplementedMetricsServiceServer

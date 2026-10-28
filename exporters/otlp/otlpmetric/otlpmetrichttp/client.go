@@ -44,17 +44,6 @@ type client struct {
 	inst *observ.Instrumentation
 }
 
-type contextCheckRoundTripper struct {
-	base http.RoundTripper
-}
-
-func (rt contextCheckRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if err := req.Context().Err(); err != nil {
-		return nil, err
-	}
-	return rt.base.RoundTrip(req)
-}
-
 // Keep it in sync with golang's DefaultTransport from net/http! We
 // have our own copy to avoid handling a situation where the
 // DefaultTransport is overwritten with some different implementation
@@ -109,7 +98,7 @@ func newClient(cfg oconf.Config) (*client, error) {
 		if baseTransport == nil {
 			baseTransport = ourTransport.Clone()
 		}
-		rt, err := cfg.Metrics.AuthenticatorRoundTripper(contextCheckRoundTripper{base: baseTransport})
+		rt, err := cfg.Metrics.AuthenticatorRoundTripper(baseTransport)
 		if err != nil {
 			return nil, err
 		}
@@ -343,7 +332,6 @@ func (c *client) newRequest(ctx context.Context, body []byte) (request, error) {
 		req.GetBody = bodyReaderErr(b.Bytes())
 	}
 
-	req.baseHeader = r.Header.Clone()
 	return req, nil
 }
 
@@ -365,7 +353,6 @@ func bodyReaderErr(buf []byte) func() (io.ReadCloser, error) {
 type request struct {
 	*http.Request
 
-	baseHeader http.Header
 	// bodyReader allows the same body to be used for multiple requests.
 	bodyReader func() io.ReadCloser
 }
@@ -374,9 +361,6 @@ type request struct {
 func (r *request) reset(ctx context.Context) {
 	r.Body = r.bodyReader()
 	r.Request = r.WithContext(ctx)
-	if r.baseHeader != nil {
-		r.Header = r.baseHeader.Clone()
-	}
 }
 
 // retryableError represents a request failure that can be retried.

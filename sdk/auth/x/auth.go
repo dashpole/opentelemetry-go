@@ -126,7 +126,14 @@ func (rt *headersRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 		return rt.base.RoundTrip(req)
 	}
 	cloned := req.Clone(req.Context())
-	ApplyHTTPHeaders(cloned.Header, hdrs)
+	for k, v := range hdrs {
+		for existingKey := range cloned.Header {
+			if strings.EqualFold(existingKey, k) {
+				delete(cloned.Header, existingKey)
+			}
+		}
+		cloned.Header.Set(k, v)
+	}
 	return rt.base.RoundTrip(cloned)
 }
 
@@ -143,45 +150,4 @@ func (c headersPerRPCCredentials) GetRequestMetadata(ctx context.Context, _ ...s
 
 func (headersPerRPCCredentials) RequireTransportSecurity() bool {
 	return false
-}
-
-// MergeHeaders returns a new map containing static headers merged with dynamic
-// headers.
-//
-// Header keys are compared case-insensitively: when a key in dynamic matches a
-// key in static (ignoring ASCII case), the static entry is replaced by the
-// dynamic key and value. Neither input map is mutated.
-func MergeHeaders(static, dynamic map[string]string) map[string]string {
-	if len(static) == 0 && len(dynamic) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(static)+len(dynamic))
-	for k, v := range static {
-		out[k] = v
-	}
-	for dk, dv := range dynamic {
-		for sk := range out {
-			if strings.EqualFold(sk, dk) {
-				delete(out, sk)
-			}
-		}
-		out[dk] = dv
-	}
-	return out
-}
-
-// ApplyHTTPHeaders merges dynamic headers into dst, overriding any existing
-// header entries with matching keys (case-insensitively via [http.Header.Set]).
-func ApplyHTTPHeaders(dst http.Header, dynamic map[string]string) {
-	if dst == nil || len(dynamic) == 0 {
-		return
-	}
-	for k, v := range dynamic {
-		for existingKey := range dst {
-			if strings.EqualFold(existingKey, k) {
-				delete(dst, existingKey)
-			}
-		}
-		dst.Set(k, v)
-	}
 }

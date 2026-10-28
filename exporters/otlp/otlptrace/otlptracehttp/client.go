@@ -80,17 +80,6 @@ type client struct {
 
 var _ otlptrace.Client = (*client)(nil)
 
-type contextCheckRoundTripper struct {
-	base http.RoundTripper
-}
-
-func (rt contextCheckRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if err := req.Context().Err(); err != nil {
-		return nil, err
-	}
-	return rt.base.RoundTrip(req)
-}
-
 // NewClient creates a new HTTP trace client.
 func NewClient(opts ...Option) otlptrace.Client {
 	cfg := otlpconfig.NewHTTPConfig(asHTTPOptions(opts)...)
@@ -125,7 +114,7 @@ func NewClient(opts ...Option) otlptrace.Client {
 		if baseTransport == nil {
 			baseTransport = ourTransport.Clone()
 		}
-		rt, err := cfg.Traces.AuthenticatorRoundTripper(contextCheckRoundTripper{base: baseTransport})
+		rt, err := cfg.Traces.AuthenticatorRoundTripper(baseTransport)
 		if err != nil {
 			startErr = err
 		} else {
@@ -388,7 +377,6 @@ func (c *client) newRequest(pbRequest *coltracepb.ExportTraceServiceRequest) (re
 		req.GetBody = bodyReaderErr(b.Bytes())
 	}
 
-	req.baseHeader = r.Header.Clone()
 	return req, nil
 }
 
@@ -419,7 +407,6 @@ func bodyReaderErr(buf []byte) func() (io.ReadCloser, error) {
 type request struct {
 	*http.Request
 
-	baseHeader http.Header
 	// bodyReader allows the same body to be used for multiple requests.
 	bodyReader func() io.ReadCloser
 }
@@ -428,9 +415,6 @@ type request struct {
 func (r *request) reset(ctx context.Context) {
 	r.Body = r.bodyReader()
 	r.Request = r.WithContext(ctx)
-	if r.baseHeader != nil {
-		r.Header = r.baseHeader.Clone()
-	}
 }
 
 // retryableError represents a request failure that can be retried.
