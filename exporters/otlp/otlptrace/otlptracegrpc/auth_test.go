@@ -161,7 +161,7 @@ func TestAuthenticatorEndToEndAndHeaderPrecedence(t *testing.T) {
 		testAuthOption{
 			headers: func(reqCtx context.Context) (map[string]string, error) {
 				<-reqCtx.Done()
-				return map[string]string{"Authorization": "Bearer late"}, nil
+				return nil, reqCtx.Err()
 			},
 		},
 	)
