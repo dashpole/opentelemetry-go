@@ -211,7 +211,7 @@ func (m *configuratorMeter) Int64ObservableCounter(
 	return m.int64ObservableInstrument(
 		id,
 		defaultAttributes(options),
-		isOptIn(options),
+		isDisabledByDefault(m.meter, options),
 		m.gateInt64Callbacks(cfg.Callbacks()),
 	)
 }
@@ -231,7 +231,7 @@ func (m *configuratorMeter) Int64ObservableUpDownCounter(
 	return m.int64ObservableInstrument(
 		id,
 		defaultAttributes(options),
-		isOptIn(options),
+		isDisabledByDefault(m.meter, options),
 		m.gateInt64Callbacks(cfg.Callbacks()),
 	)
 }
@@ -251,7 +251,7 @@ func (m *configuratorMeter) Int64ObservableGauge(
 	return m.int64ObservableInstrument(
 		id,
 		defaultAttributes(options),
-		isOptIn(options),
+		isDisabledByDefault(m.meter, options),
 		m.gateInt64Callbacks(cfg.Callbacks()),
 	)
 }
@@ -271,7 +271,7 @@ func (m *configuratorMeter) Float64ObservableCounter(
 	return m.float64ObservableInstrument(
 		id,
 		defaultAttributes(options),
-		isOptIn(options),
+		isDisabledByDefault(m.meter, options),
 		m.gateFloat64Callbacks(cfg.Callbacks()),
 	)
 }
@@ -291,7 +291,7 @@ func (m *configuratorMeter) Float64ObservableUpDownCounter(
 	return m.float64ObservableInstrument(
 		id,
 		defaultAttributes(options),
-		isOptIn(options),
+		isDisabledByDefault(m.meter, options),
 		m.gateFloat64Callbacks(cfg.Callbacks()),
 	)
 }
@@ -311,7 +311,7 @@ func (m *configuratorMeter) Float64ObservableGauge(
 	return m.float64ObservableInstrument(
 		id,
 		defaultAttributes(options),
-		isOptIn(options),
+		isDisabledByDefault(m.meter, options),
 		m.gateFloat64Callbacks(cfg.Callbacks()),
 	)
 }

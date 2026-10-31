@@ -46,6 +46,10 @@ type tracerProviderConfig struct {
 
 	// panicRecordingDisabled disables recording exception events from panics.
 	panicRecordingDisabled bool
+
+	// minimumStability is the minimum stability level required for spans to be
+	// recorded by default.
+	minimumStability int
 }
 
 // MarshalLog is the marshaling function used by the logging system to represent this Provider.
@@ -85,6 +89,7 @@ type TracerProvider struct {
 	spanLimits             SpanLimits
 	resource               *resource.Resource
 	panicRecordingDisabled bool
+	minimumStability       int
 }
 
 var _ trace.TracerProvider = &TracerProvider{}
@@ -111,6 +116,9 @@ func NewTracerProvider(opts ...TracerProviderOption) *TracerProvider {
 
 	for _, opt := range opts {
 		if _, ok := opt.(experimentalOption); ok {
+			if msOpt, ok := opt.(interface{ MinimumStability() int }); ok {
+				o.minimumStability = msOpt.MinimumStability()
+			}
 			continue
 		}
 		o = opt.apply(o)
@@ -125,6 +133,7 @@ func NewTracerProvider(opts ...TracerProviderOption) *TracerProvider {
 		spanLimits:             o.spanLimits,
 		resource:               o.resource,
 		panicRecordingDisabled: o.panicRecordingDisabled,
+		minimumStability:       o.minimumStability,
 	}
 	global.Info("TracerProvider created", "config", o)
 

@@ -13,6 +13,7 @@ They may be changed in backwards-incompatible ways, or removed entirely.
 
 - [MeterConfigurator](#meterconfigurator)
 - [View Enabled and Opt-In Instruments](#view-enabled-and-opt-in-instruments)
+- [Instrumentation Stability](#instrumentation-stability)
 
 ### MeterConfigurator
 
@@ -37,6 +38,13 @@ That difference needs to be resolved before stabilization; see [specification is
 - If `Stream.Enabled` is `nil` (unset), standard instruments use their configured or default aggregation, while opt-in instruments created with `WithOptIn` default to `sdkmetric.AggregationDrop`.
 - If `Stream.Enabled` points to `true`, the stream is enabled (including for opt-in instruments).
 - If `Stream.Enabled` points to `false`, the stream is disabled and uses `sdkmetric.AggregationDrop`.
+
+### Instrumentation Stability
+
+`WithMinimumStability` configures the minimum stability level (`StabilityStable` by default, or `StabilityDevelopment`) for instruments on a `MeterProvider`, working alongside `go.opentelemetry.io/otel/metric/x.WithStability`.
+
+- Instruments with a stability level less than `minimum_stability` (such as `StabilityDevelopment` when `minimum_stability` is `StabilityStable`) are disabled by default (`sdkmetric.AggregationDrop`) unless explicitly enabled by a View (`Stream.Enabled = true`).
+- Setting `WithMinimumStability(StabilityDevelopment)` enables both `StabilityStable` and `StabilityDevelopment` instruments by default.
 
 ## Compatibility and Stability
 

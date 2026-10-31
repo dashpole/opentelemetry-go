@@ -55,3 +55,12 @@ func ExampleWithOptIn() {
 		x.WithOptIn(),
 	)
 }
+
+func ExampleWithStability() {
+	var meter metric.Meter = noop.Meter{}
+
+	_, _ = meter.Int64UpDownCounter(
+		"http.server.active_requests",
+		x.WithStability(x.StabilityDevelopment),
+	)
+}

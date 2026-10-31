@@ -82,8 +82,12 @@ func NewMeterProvider(options ...Option) *MeterProvider {
 		}
 	}
 
+	pipes := newPipelines(conf.res, conf.readers, conf.views, conf.exemplarFilter, conf.cardinalityLimit)
+	for _, p := range pipes {
+		p.minimumStability = conf.minimumStability
+	}
 	mp := &MeterProvider{
-		pipes:        newPipelines(conf.res, conf.readers, conf.views, conf.exemplarFilter, conf.cardinalityLimit),
+		pipes:        pipes,
 		meterFactory: factory,
 		forceFlush:   flush,
 		shutdown:     sdown,

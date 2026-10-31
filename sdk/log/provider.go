@@ -30,12 +30,13 @@ const (
 )
 
 type providerConfig struct {
-	resource        *resource.Resource
-	processors      []Processor
-	attrCntLim      setting[int]
-	attrValLenLim   setting[int]
-	attrValDepthLim setting[int]
-	allowDupKeys    setting[bool]
+	resource         *resource.Resource
+	processors       []Processor
+	attrCntLim       setting[int]
+	attrValLenLim    setting[int]
+	attrValDepthLim  setting[int]
+	allowDupKeys     setting[bool]
+	minimumStability int
 }
 
 type experimentalOption interface {
@@ -46,6 +47,9 @@ func newProviderConfig(opts []LoggerProviderOption) providerConfig {
 	var c providerConfig
 	for _, opt := range opts {
 		if _, ok := opt.(experimentalOption); ok {
+			if msOpt, ok := opt.(interface{ MinimumStability() int }); ok {
+				c.minimumStability = msOpt.MinimumStability()
+			}
 			continue
 		}
 		c = opt.apply(c)
@@ -87,6 +91,7 @@ type LoggerProvider struct {
 	attributeValueLengthLimit int
 	attributeValueDepthLimit  int
 	allowDupKeys              bool
+	minimumStability          int
 
 	loggersMu sync.Mutex
 	loggers   map[instrumentation.Scope]*logger
@@ -118,6 +123,7 @@ func NewLoggerProvider(opts ...LoggerProviderOption) *LoggerProvider {
 		attributeValueLengthLimit: cfg.attrValLenLim.Value,
 		attributeValueDepthLimit:  cfg.attrValDepthLim.Value,
 		allowDupKeys:              cfg.allowDupKeys.Value,
+		minimumStability:          cfg.minimumStability,
 	}
 }
 

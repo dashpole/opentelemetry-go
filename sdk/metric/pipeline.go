@@ -82,6 +82,7 @@ type pipeline struct {
 	multiCallbacks   list.List
 	exemplarFilter   exemplar.Filter
 	cardinalityLimit int
+	minimumStability int
 }
 
 // addInt64Measure adds a new int64 measure to the pipeline for each observer.

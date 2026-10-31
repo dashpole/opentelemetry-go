@@ -11,6 +11,7 @@ See the [Compatibility and Stability](#compatibility-and-stability) section for 
 ## Features
 
 - [ProbabilitySampler](#probabilitysampler)
+- [Instrumentation Stability](#instrumentation-stability)
 
 ### ProbabilitySampler
 
@@ -32,6 +33,13 @@ tp := sdktrace.NewTracerProvider(
 	),
 )
 ```
+
+### Instrumentation Stability
+
+`WithMinimumStability` configures the minimum stability level (`StabilityStable` by default, or `StabilityDevelopment`) for Spans on a `TracerProvider`, working alongside `go.opentelemetry.io/otel/trace/x.WithStability` and `go.opentelemetry.io/otel/trace/x.Enabled`.
+
+- Spans started with a stability level less than `minimum_stability` (such as `StabilityDevelopment` when `minimum_stability` is `StabilityStable`) return a non-recording `Span` without invoking the `IDGenerator`, `Sampler`, or any `SpanProcessor`, while preserving any parent `SpanContext` in the returned `Context`.
+- Setting `WithMinimumStability(StabilityDevelopment)` enables both `StabilityStable` and `StabilityDevelopment` Spans.
 
 ## Compatibility and Stability
 
