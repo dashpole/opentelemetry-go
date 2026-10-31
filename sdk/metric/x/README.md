@@ -13,6 +13,7 @@ They may be changed in backwards-incompatible ways, or removed entirely.
 
 - [MeterConfigurator](#meterconfigurator)
 - [View Enabled and Opt-In Instruments](#view-enabled-and-opt-in-instruments)
+- [Instrumentation Stability](#instrumentation-stability)
 
 ### MeterConfigurator
 
@@ -37,6 +38,15 @@ That difference needs to be resolved before stabilization; see [specification is
 - If `Stream.Enabled` is `nil` (unset), standard instruments use their configured or default aggregation, while opt-in instruments created with `WithOptIn` default to `sdkmetric.AggregationDrop`.
 - If `Stream.Enabled` points to `true`, the stream is enabled (including for opt-in instruments).
 - If `Stream.Enabled` points to `false`, the stream is disabled and uses `sdkmetric.AggregationDrop`.
+
+### Instrumentation Stability
+
+`WithMinimumStability` configures the minimum stability level (`StabilityStable` by default, or `StabilityDevelopment`) for instruments and attributes on a `MeterProvider`, working alongside `go.opentelemetry.io/otel/metric/x.WithStability` and `go.opentelemetry.io/otel/metric/x.AttributeEnabled`.
+
+- Instruments with a stability level less than `minimum_stability` (such as `StabilityDevelopment` when `minimum_stability` is `StabilityStable`) are disabled by default (`sdkmetric.AggregationDrop`) unless explicitly enabled by a View (`Stream.Enabled = true`).
+- `AttributeEnabled(meter, key, stability...)` returns `false` when the `Meter` is disabled by a `MeterConfigurator`, when there are no registered `Reader`s, or when `stability` (defaulting to `StabilityStable`) is less than `minimum_stability`, unless an active View matching the `Meter`'s scope explicitly includes `key` in an allow-list `AttributeFilter` (such as `attribute.NewAllowKeysFilter`).
+  To find these Views, each View is called once per `Meter` with an `Instrument` that has only `Scope` set and an undefined `Kind`. A View created with `NewView` matches it if its criteria's `Scope` matches, regardless of its other criteria.
+- Setting `WithMinimumStability(StabilityDevelopment)` enables both `StabilityStable` and `StabilityDevelopment` instruments and attributes by default.
 
 ## Compatibility and Stability
 

@@ -7,6 +7,7 @@ import (
 	"context"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/instrumentation"
 	"go.opentelemetry.io/otel/sdk/trace/internal/observ"
 	"go.opentelemetry.io/otel/trace"
@@ -34,12 +35,17 @@ func (tr *tracer) Start(
 	name string,
 	options ...trace.SpanStartOption,
 ) (context.Context, trace.Span) {
-	config := trace.NewSpanStartConfig(options...)
-
 	if ctx == nil {
 		// Prevent trace.ContextWithSpan from panicking.
 		ctx = context.Background()
 	}
+
+	if spanStability(options) < tr.provider.minimumStability {
+		s := tr.newNonRecordingSpan(trace.SpanContextFromContext(ctx))
+		return trace.ContextWithSpan(ctx, s), s
+	}
+
+	config := trace.NewSpanStartConfig(options...)
 
 	// For local spans created by this SDK, track child span count.
 	if p := trace.SpanFromContext(ctx); p != nil {
@@ -185,4 +191,40 @@ func (tr *tracer) newRecordingSpan(
 // newNonRecordingSpan returns a new configured nonRecordingSpan.
 func (tr *tracer) newNonRecordingSpan(sc trace.SpanContext) nonRecordingSpan {
 	return nonRecordingSpan{tracer: tr, sc: sc}
+}
+
+// Enabled reports whether a Span with the given options would be recorded.
+func (tr *tracer) Enabled(_ context.Context, options ...trace.SpanStartOption) bool {
+	if tr.provider.isShutdown.Load() {
+		return false
+	}
+	if len(tr.provider.getSpanProcessors()) == 0 {
+		return false
+	}
+	if spanStability(options) < tr.provider.minimumStability {
+		return false
+	}
+	return true
+}
+
+// ExperimentalAttributeEnabled reports whether an attribute with the given key and
+// stability level would be recorded by tr.
+func (tr *tracer) ExperimentalAttributeEnabled(_ attribute.Key, stability int) bool {
+	if tr.provider.isShutdown.Load() {
+		return false
+	}
+	if len(tr.provider.getSpanProcessors()) == 0 {
+		return false
+	}
+	return stability >= tr.provider.minimumStability
+}
+
+func spanStability(options []trace.SpanStartOption) int {
+	var stability int
+	for _, opt := range options {
+		if sOpt, ok := opt.(interface{ Stability() int }); ok {
+			stability = sOpt.Stability()
+		}
+	}
+	return stability
 }

@@ -55,3 +55,30 @@ func ExampleWithOptIn() {
 		x.WithOptIn(),
 	)
 }
+
+func ExampleWithStability() {
+	var meter metric.Meter = noop.Meter{}
+
+	_, _ = meter.Int64UpDownCounter(
+		"http.server.active_requests",
+		x.WithStability(x.StabilityDevelopment),
+	)
+}
+
+func ExampleAttributeEnabled() {
+	var meter metric.Meter = noop.Meter{}
+	ctx := context.Background()
+
+	duration, _ := meter.Float64Histogram(
+		"http.server.request.duration",
+		x.WithDefaultAttributes("http.request.method", "url.template"),
+	)
+
+	attrs := []attribute.KeyValue{attribute.String("http.request.method", http.MethodGet)}
+	// url.template is a Development attribute: only compute and record it when
+	// the Meter enables it.
+	if x.AttributeEnabled(meter, "url.template", x.StabilityDevelopment) {
+		attrs = append(attrs, attribute.String("url.template", "/users/{id}"))
+	}
+	duration.Record(ctx, 0.25, metric.WithAttributes(attrs...))
+}

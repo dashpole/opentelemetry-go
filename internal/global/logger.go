@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/embedded"
 )
@@ -93,4 +94,38 @@ func (l *logger) Enabled(ctx context.Context, param log.EnabledParameters) bool 
 
 func (l *logger) setDelegate(provider log.LoggerProvider) {
 	l.delegate.Store(provider.Logger(l.name, l.options...))
+}
+
+func (l *logger) ExperimentalEmit(ctx context.Context, r log.Record, stability int) {
+	if del, ok := l.delegate.Load().(log.Logger); ok {
+		if sl, ok := del.(interface {
+			ExperimentalEmit(context.Context, log.Record, int)
+		}); ok {
+			sl.ExperimentalEmit(ctx, r, stability)
+			return
+		}
+		del.Emit(ctx, r)
+	}
+}
+
+func (l *logger) ExperimentalEnabled(ctx context.Context, param log.EnabledParameters, stability int) bool {
+	if del, ok := l.delegate.Load().(log.Logger); ok {
+		if sl, ok := del.(interface {
+			ExperimentalEnabled(context.Context, log.EnabledParameters, int) bool
+		}); ok {
+			return sl.ExperimentalEnabled(ctx, param, stability)
+		}
+		return del.Enabled(ctx, param)
+	}
+	return false
+}
+
+// ExperimentalAttributeEnabled reports whether an attribute with the given key and
+// stability level would be recorded by forwarding the call to the delegate if
+// set, otherwise returning false.
+func (l *logger) ExperimentalAttributeEnabled(key attribute.Key, stability int) bool {
+	ae, ok := l.delegate.Load().(interface {
+		ExperimentalAttributeEnabled(key attribute.Key, stability int) bool
+	})
+	return ok && ae.ExperimentalAttributeEnabled(key, stability)
 }

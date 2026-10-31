@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/internal/global"
@@ -37,6 +38,9 @@ type meter struct {
 
 	int64Resolver   resolver[int64]
 	float64Resolver resolver[float64]
+
+	includeFiltersOnce sync.Once
+	includeFilters     [][]attribute.Filter
 }
 
 func newMeter(s instrumentation.Scope, p pipelines) *meter {
@@ -71,7 +75,7 @@ func (m *meter) Int64Counter(name string, options ...metric.Int64CounterOption) 
 	cfg := metric.NewInt64CounterConfig(options...)
 	const kind = InstrumentKindCounter
 	p := int64InstProvider{m}
-	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), defaultAttributes(options), isOptIn(options))
+	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), defaultAttributes(options), isDisabledByDefault(m, options))
 	if err != nil {
 		return i, err
 	}
@@ -89,7 +93,7 @@ func (m *meter) Int64UpDownCounter(
 	cfg := metric.NewInt64UpDownCounterConfig(options...)
 	const kind = InstrumentKindUpDownCounter
 	p := int64InstProvider{m}
-	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), defaultAttributes(options), isOptIn(options))
+	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), defaultAttributes(options), isDisabledByDefault(m, options))
 	if err != nil {
 		return i, err
 	}
@@ -103,7 +107,7 @@ func (m *meter) Int64UpDownCounter(
 func (m *meter) Int64Histogram(name string, options ...metric.Int64HistogramOption) (metric.Int64Histogram, error) {
 	cfg := metric.NewInt64HistogramConfig(options...)
 	p := int64InstProvider{m}
-	i, err := p.lookupHistogram(name, cfg, defaultAttributes(options), isOptIn(options))
+	i, err := p.lookupHistogram(name, cfg, defaultAttributes(options), isDisabledByDefault(m, options))
 	if err != nil {
 		return i, err
 	}
@@ -118,7 +122,7 @@ func (m *meter) Int64Gauge(name string, options ...metric.Int64GaugeOption) (met
 	cfg := metric.NewInt64GaugeConfig(options...)
 	const kind = InstrumentKindGauge
 	p := int64InstProvider{m}
-	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), defaultAttributes(options), isOptIn(options))
+	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), defaultAttributes(options), isDisabledByDefault(m, options))
 	if err != nil {
 		return i, err
 	}
@@ -194,7 +198,7 @@ func (m *meter) Int64ObservableCounter(
 		Kind:        InstrumentKindObservableCounter,
 		Scope:       m.scope,
 	}
-	return m.int64ObservableInstrument(id, defaultAttributes(options), isOptIn(options), cfg.Callbacks())
+	return m.int64ObservableInstrument(id, defaultAttributes(options), isDisabledByDefault(m, options), cfg.Callbacks())
 }
 
 // Int64ObservableUpDownCounter returns a new instrument identified by name and
@@ -218,7 +222,7 @@ func (m *meter) Int64ObservableUpDownCounter(
 		Kind:        InstrumentKindObservableUpDownCounter,
 		Scope:       m.scope,
 	}
-	return m.int64ObservableInstrument(id, defaultAttributes(options), isOptIn(options), cfg.Callbacks())
+	return m.int64ObservableInstrument(id, defaultAttributes(options), isDisabledByDefault(m, options), cfg.Callbacks())
 }
 
 // Int64ObservableGauge returns a new instrument identified by name and
@@ -242,7 +246,7 @@ func (m *meter) Int64ObservableGauge(
 		Kind:        InstrumentKindObservableGauge,
 		Scope:       m.scope,
 	}
-	return m.int64ObservableInstrument(id, defaultAttributes(options), isOptIn(options), cfg.Callbacks())
+	return m.int64ObservableInstrument(id, defaultAttributes(options), isDisabledByDefault(m, options), cfg.Callbacks())
 }
 
 // Float64Counter returns a new instrument identified by name and configured
@@ -252,7 +256,7 @@ func (m *meter) Float64Counter(name string, options ...metric.Float64CounterOpti
 	cfg := metric.NewFloat64CounterConfig(options...)
 	const kind = InstrumentKindCounter
 	p := float64InstProvider{m}
-	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), defaultAttributes(options), isOptIn(options))
+	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), defaultAttributes(options), isDisabledByDefault(m, options))
 	if err != nil {
 		return i, err
 	}
@@ -270,7 +274,7 @@ func (m *meter) Float64UpDownCounter(
 	cfg := metric.NewFloat64UpDownCounterConfig(options...)
 	const kind = InstrumentKindUpDownCounter
 	p := float64InstProvider{m}
-	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), defaultAttributes(options), isOptIn(options))
+	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), defaultAttributes(options), isDisabledByDefault(m, options))
 	if err != nil {
 		return i, err
 	}
@@ -287,7 +291,7 @@ func (m *meter) Float64Histogram(
 ) (metric.Float64Histogram, error) {
 	cfg := metric.NewFloat64HistogramConfig(options...)
 	p := float64InstProvider{m}
-	i, err := p.lookupHistogram(name, cfg, defaultAttributes(options), isOptIn(options))
+	i, err := p.lookupHistogram(name, cfg, defaultAttributes(options), isDisabledByDefault(m, options))
 	if err != nil {
 		return i, err
 	}
@@ -302,7 +306,7 @@ func (m *meter) Float64Gauge(name string, options ...metric.Float64GaugeOption) 
 	cfg := metric.NewFloat64GaugeConfig(options...)
 	const kind = InstrumentKindGauge
 	p := float64InstProvider{m}
-	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), defaultAttributes(options), isOptIn(options))
+	i, err := p.lookup(kind, name, cfg.Description(), cfg.Unit(), defaultAttributes(options), isDisabledByDefault(m, options))
 	if err != nil {
 		return i, err
 	}
@@ -378,7 +382,7 @@ func (m *meter) Float64ObservableCounter(
 		Kind:        InstrumentKindObservableCounter,
 		Scope:       m.scope,
 	}
-	return m.float64ObservableInstrument(id, defaultAttributes(options), isOptIn(options), cfg.Callbacks())
+	return m.float64ObservableInstrument(id, defaultAttributes(options), isDisabledByDefault(m, options), cfg.Callbacks())
 }
 
 // Float64ObservableUpDownCounter returns a new instrument identified by name
@@ -402,7 +406,7 @@ func (m *meter) Float64ObservableUpDownCounter(
 		Kind:        InstrumentKindObservableUpDownCounter,
 		Scope:       m.scope,
 	}
-	return m.float64ObservableInstrument(id, defaultAttributes(options), isOptIn(options), cfg.Callbacks())
+	return m.float64ObservableInstrument(id, defaultAttributes(options), isDisabledByDefault(m, options), cfg.Callbacks())
 }
 
 // Float64ObservableGauge returns a new instrument identified by name and
@@ -426,7 +430,7 @@ func (m *meter) Float64ObservableGauge(
 		Kind:        InstrumentKindObservableGauge,
 		Scope:       m.scope,
 	}
-	return m.float64ObservableInstrument(id, defaultAttributes(options), isOptIn(options), cfg.Callbacks())
+	return m.float64ObservableInstrument(id, defaultAttributes(options), isDisabledByDefault(m, options), cfg.Callbacks())
 }
 
 func validateInstrumentName(name string) error {
@@ -834,12 +838,54 @@ func defaultAttributes[T any](opts []T) []attribute.Key {
 	return keys
 }
 
-func isOptIn[T any](opts []T) bool {
+func isDisabledByDefault[T any](m *meter, opts []T) bool {
+	var minStability int
+	if m != nil && len(m.pipes) > 0 {
+		minStability = m.pipes[0].minimumStability
+	}
 	var optIn bool
+	var stability int
 	for _, o := range opts {
 		if exp, ok := any(o).(interface{ OptIn() bool }); ok {
 			optIn = exp.OptIn()
 		}
+		if exp, ok := any(o).(interface{ Stability() int }); ok {
+			stability = exp.Stability()
+		}
 	}
-	return optIn
+	return optIn || stability < minStability
+}
+
+// ExperimentalAttributeEnabled reports whether an attribute with the given
+// key and stability level would be recorded by m.
+//
+// It returns false if there are no registered Readers. Otherwise, it returns
+// true if stability meets or exceeds the minimum stability of a Reader's
+// pipeline, or if an active View of that pipeline matching m's scope
+// explicitly includes key in its AttributeFilter.
+func (m *meter) ExperimentalAttributeEnabled(key attribute.Key, stability int) bool {
+	for i, p := range m.pipes {
+		if stability >= p.minimumStability {
+			return true
+		}
+		for _, f := range m.viewIncludeFilters()[i] {
+			if f(key.String("")) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// viewIncludeFilters returns, for each pipeline of m, the allow-list
+// AttributeFilters of the active Views matching m's scope. The Views are
+// probed at most once per meter.
+func (m *meter) viewIncludeFilters() [][]attribute.Filter {
+	m.includeFiltersOnce.Do(func() {
+		m.includeFilters = make([][]attribute.Filter, len(m.pipes))
+		for i, p := range m.pipes {
+			m.includeFilters[i] = p.includeFilters(m.scope)
+		}
+	})
+	return m.includeFilters
 }

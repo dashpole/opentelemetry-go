@@ -42,7 +42,7 @@ func (f *factory) Int64Counter(name string, options ...metric.Int64CounterOption
 			f.meter.int64Resolver,
 			inst,
 			defaultAttributes(options),
-			isOptIn(options),
+			isDisabledByDefault(f.meter, options),
 			f.registry.Register,
 		)
 		return finish.NewInt64Counter(
@@ -75,7 +75,7 @@ func (f *factory) Float64Counter(name string, options ...metric.Float64CounterOp
 			f.meter.float64Resolver,
 			inst,
 			defaultAttributes(options),
-			isOptIn(options),
+			isDisabledByDefault(f.meter, options),
 			f.registry.Register,
 		)
 		return finish.NewFloat64Counter(

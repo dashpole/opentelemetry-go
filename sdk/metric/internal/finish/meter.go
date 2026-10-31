@@ -3,7 +3,10 @@
 
 package finish
 
-import "go.opentelemetry.io/otel/metric"
+import (
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+)
 
 // Factory constructs Finish-aware synchronous instruments.
 type Factory interface {
@@ -27,4 +30,12 @@ func (m *meter) Int64Counter(name string, options ...metric.Int64CounterOption) 
 
 func (m *meter) Float64Counter(name string, options ...metric.Float64CounterOption) (metric.Float64Counter, error) {
 	return m.factory.Float64Counter(name, options...)
+}
+
+// ExperimentalAttributeEnabled forwards to the decorated Meter.
+func (m *meter) ExperimentalAttributeEnabled(key attribute.Key, stability int) bool {
+	ae, ok := m.Meter.(interface {
+		ExperimentalAttributeEnabled(key attribute.Key, stability int) bool
+	})
+	return ok && ae.ExperimentalAttributeEnabled(key, stability)
 }

@@ -55,6 +55,14 @@ func newLogger(p *LoggerProvider, scope instrumentation.Scope) *logger {
 }
 
 func (l *logger) Emit(ctx context.Context, r log.Record) {
+	l.ExperimentalEmit(ctx, r, 0)
+}
+
+func (l *logger) ExperimentalEmit(ctx context.Context, r log.Record, stability int) {
+	if stability < l.provider.minimumStability {
+		return
+	}
+
 	processors := l.provider.processors
 	if len(processors) == 0 {
 		if l.provider.stopped.Load() {
@@ -105,6 +113,14 @@ func (l *logger) recordCreated(ctx context.Context) {
 // processed, true will be returned by default. A value of false will only be
 // returned if it can be positively verified that no Processor will process it.
 func (l *logger) Enabled(ctx context.Context, param log.EnabledParameters) bool {
+	return l.ExperimentalEnabled(ctx, param, 0)
+}
+
+func (l *logger) ExperimentalEnabled(ctx context.Context, param log.EnabledParameters, stability int) bool {
+	if stability < l.provider.minimumStability {
+		return false
+	}
+
 	p := EnabledParameters{
 		InstrumentationScope: l.instrumentationScope,
 		Severity:             param.Severity,
@@ -125,6 +141,15 @@ func (l *logger) Enabled(ctx context.Context, param log.EnabledParameters) bool 
 	}
 	// No Processor will process the record.
 	return false
+}
+
+// ExperimentalAttributeEnabled reports whether an attribute with the given key and
+// stability level would be recorded by l.
+func (l *logger) ExperimentalAttributeEnabled(_ attribute.Key, stability int) bool {
+	if len(l.provider.processors) == 0 || l.provider.stopped.Load() {
+		return false
+	}
+	return stability >= l.provider.minimumStability
 }
 
 func (l *logger) newRecord(ctx context.Context, r log.Record) Record {

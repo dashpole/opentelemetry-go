@@ -22,6 +22,7 @@ type config struct {
 	views            []View
 	exemplarFilter   exemplar.Filter
 	cardinalityLimit int
+	minimumStability int
 	experimental     []experimentalOption
 }
 
@@ -88,6 +89,9 @@ func newConfig(options []Option) config {
 		switch experimental := o.(type) {
 		case experimentalOption:
 			conf.experimental = append(conf.experimental, experimental)
+			if msOpt, ok := o.(interface{ MinimumStability() int }); ok {
+				conf.minimumStability = msOpt.MinimumStability()
+			}
 			if vOpt, ok := o.(interface {
 				ExperimentalViews() []func(Instrument) (Stream, *bool, bool)
 			}); ok {

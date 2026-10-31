@@ -54,6 +54,10 @@ const (
 	// instantaneous values synchronously with the code path they are
 	// measuring.
 	InstrumentKindGauge InstrumentKind = 7
+
+	// instrumentKindScope identifies a probe used to find the Views that match
+	// an instrumentation scope, regardless of their other criteria.
+	instrumentKindScope InstrumentKind = 255
 )
 
 type nonComparable [0]func() // nolint: unused  // This is indeed used.

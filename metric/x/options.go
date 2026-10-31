@@ -48,6 +48,69 @@ func WithOptIn() metric.InstrumentOption {
 	return optInOption{}
 }
 
+// Stability represents the maturity level of telemetry.
+type Stability int
+
+const (
+	// StabilityDevelopment indicates experimental telemetry that may change
+	// or be removed in minor versions of a stable instrumentation library.
+	StabilityDevelopment Stability = -1
+	// StabilityStable indicates telemetry covered by backward-compatibility
+	// guarantees.
+	StabilityStable Stability = 0
+)
+
+type stabilityOption struct {
+	metric.InstrumentOption
+	s Stability
+}
+
+// Experimental prevents the API from panicking when the option is used.
+func (stabilityOption) Experimental() {}
+
+func (o stabilityOption) Stability() int {
+	return int(o.s)
+}
+
+// WithStability returns a [metric.InstrumentOption] that sets the stability
+// advisory parameter of an instrument.
+//
+// By default, instruments have [StabilityStable]. Instruments configured with
+// [StabilityDevelopment] use the drop aggregation by default when the
+// MeterProvider's minimum stability is [StabilityStable], unless explicitly
+// enabled by a View or when the MeterProvider's minimum stability is set to
+// [StabilityDevelopment].
+func WithStability(s Stability) metric.InstrumentOption {
+	return stabilityOption{s: s}
+}
+
+// AttributeEnabled reports whether m records an attribute with the given key
+// and stability level (StabilityStable if not provided). If more than one
+// stability is provided, the last one is used.
+//
+// The variadic stability parameter keeps the call site
+// AttributeEnabled(m, key, StabilityDevelopment) unchanged if additional
+// parameters are added later as options that Stability also implements.
+//
+// Instrumentation should call AttributeEnabled before computing or attaching a
+// StabilityDevelopment attribute. It returns false if m is nil, a no-op
+// Meter, or does not support attribute enablement.
+//
+// This function is experimental and may be changed or removed in a future release.
+func AttributeEnabled(m metric.Meter, key attribute.Key, stability ...Stability) bool {
+	ae, ok := m.(interface {
+		ExperimentalAttributeEnabled(key attribute.Key, stability int) bool
+	})
+	if !ok {
+		return false
+	}
+	s := StabilityStable
+	if len(stability) > 0 {
+		s = stability[len(stability)-1]
+	}
+	return ae.ExperimentalAttributeEnabled(key, int(s))
+}
+
 // Settable is an optional interface that Options can implement
 // to allow reuse without additional allocations.
 //

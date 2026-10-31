@@ -31,6 +31,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/embedded"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // tracerProvider is a placeholder for a configured SDK TracerProvider.
@@ -148,6 +149,31 @@ func (t *tracer) Start(ctx context.Context, name string, opts ...trace.SpanStart
 	}
 
 	return t.newSpan(ctx, autoInstEnabled, name, opts)
+}
+
+// Enabled reports whether t is enabled for the given context and options by
+// forwarding the call to t.delegate if set, otherwise returning false.
+func (t *tracer) Enabled(ctx context.Context, opts ...trace.SpanStartOption) bool {
+	delegate := t.delegate.Load()
+	if delegate == nil {
+		return false
+	}
+	if et, ok := delegate.(interface {
+		Enabled(context.Context, ...trace.SpanStartOption) bool
+	}); ok {
+		return et.Enabled(ctx, opts...)
+	}
+	return delegate != noop.Tracer{}
+}
+
+// ExperimentalAttributeEnabled reports whether an attribute with the given key and
+// stability level would be recorded by forwarding the call to t.delegate if
+// set, otherwise returning false.
+func (t *tracer) ExperimentalAttributeEnabled(key attribute.Key, stability int) bool {
+	ae, ok := t.delegate.Load().(interface {
+		ExperimentalAttributeEnabled(key attribute.Key, stability int) bool
+	})
+	return ok && ae.ExperimentalAttributeEnabled(key, stability)
 }
 
 // autoInstEnabled determines if the auto-instrumentation SDK span is returned

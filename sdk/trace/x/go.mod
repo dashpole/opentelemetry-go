@@ -7,6 +7,7 @@ require (
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/sdk v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
+	go.opentelemetry.io/otel/trace/x v0.1.0
 )
 
 require (
@@ -22,6 +23,8 @@ require (
 )
 
 replace go.opentelemetry.io/otel/trace => ../../../trace
+
+replace go.opentelemetry.io/otel/trace/x => ../../../trace/x
 
 replace go.opentelemetry.io/otel/sdk => ../../
 

@@ -8,7 +8,9 @@ import (
 	"regexp"
 	"strings"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/internal/global"
+	"go.opentelemetry.io/otel/sdk/instrumentation"
 )
 
 var (
@@ -98,7 +100,7 @@ func NewView(criteria Instrument, mask Stream) View {
 	}
 
 	return func(i Instrument) (Stream, bool) {
-		if matchFunc(i) {
+		if matchFunc(i) || (i.Kind == instrumentKindScope && criteria.matchesScope(i)) {
 			return Stream{
 				Name:                              nonZero(mask.Name, i.Name),
 				Description:                       nonZero(mask.Description, i.Description),
@@ -120,4 +122,28 @@ func nonZero[T comparable](v, alt T) T {
 		return v
 	}
 	return alt
+}
+
+// includeFilters returns the allow-list AttributeFilters of the active Views
+// of p that match scope.
+//
+// Each View is called with an Instrument with an undefined Kind and only scope
+// set. A View created by NewView matches it if its criteria's Scope matches,
+// regardless of its other criteria. An AttributeFilter is an allow-list if it
+// drops the empty (invalid) key.
+func (p *pipeline) includeFilters(scope instrumentation.Scope) []attribute.Filter {
+	probe := Instrument{Kind: instrumentKindScope, Scope: scope}
+	empty := attribute.Key("").String("")
+	var filters []attribute.Filter
+	for _, v := range p.views {
+		s, ok := v(probe)
+		if !ok || s.AttributeFilter == nil || s.AttributeFilter(empty) || (s.enabled != nil && !*s.enabled) {
+			continue
+		}
+		if _, drop := s.Aggregation.(AggregationDrop); drop {
+			continue
+		}
+		filters = append(filters, s.AttributeFilter)
+	}
+	return filters
 }

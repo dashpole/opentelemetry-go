@@ -7,6 +7,7 @@ import (
 	"context"
 	"sync"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
@@ -211,7 +212,7 @@ func (m *configuratorMeter) Int64ObservableCounter(
 	return m.int64ObservableInstrument(
 		id,
 		defaultAttributes(options),
-		isOptIn(options),
+		isDisabledByDefault(m.meter, options),
 		m.gateInt64Callbacks(cfg.Callbacks()),
 	)
 }
@@ -231,7 +232,7 @@ func (m *configuratorMeter) Int64ObservableUpDownCounter(
 	return m.int64ObservableInstrument(
 		id,
 		defaultAttributes(options),
-		isOptIn(options),
+		isDisabledByDefault(m.meter, options),
 		m.gateInt64Callbacks(cfg.Callbacks()),
 	)
 }
@@ -251,7 +252,7 @@ func (m *configuratorMeter) Int64ObservableGauge(
 	return m.int64ObservableInstrument(
 		id,
 		defaultAttributes(options),
-		isOptIn(options),
+		isDisabledByDefault(m.meter, options),
 		m.gateInt64Callbacks(cfg.Callbacks()),
 	)
 }
@@ -271,7 +272,7 @@ func (m *configuratorMeter) Float64ObservableCounter(
 	return m.float64ObservableInstrument(
 		id,
 		defaultAttributes(options),
-		isOptIn(options),
+		isDisabledByDefault(m.meter, options),
 		m.gateFloat64Callbacks(cfg.Callbacks()),
 	)
 }
@@ -291,7 +292,7 @@ func (m *configuratorMeter) Float64ObservableUpDownCounter(
 	return m.float64ObservableInstrument(
 		id,
 		defaultAttributes(options),
-		isOptIn(options),
+		isDisabledByDefault(m.meter, options),
 		m.gateFloat64Callbacks(cfg.Callbacks()),
 	)
 }
@@ -311,7 +312,7 @@ func (m *configuratorMeter) Float64ObservableGauge(
 	return m.float64ObservableInstrument(
 		id,
 		defaultAttributes(options),
-		isOptIn(options),
+		isDisabledByDefault(m.meter, options),
 		m.gateFloat64Callbacks(cfg.Callbacks()),
 	)
 }
@@ -331,4 +332,11 @@ func (m *configuratorMeter) RegisterCallback(
 		}
 		return f(ctx, o)
 	}, insts...)
+}
+
+// ExperimentalAttributeEnabled reports whether an attribute with the given key and
+// stability level would be recorded by m. It returns false when m is disabled
+// by the MeterConfigurator.
+func (m *configuratorMeter) ExperimentalAttributeEnabled(key attribute.Key, stability int) bool {
+	return m.config.Load() && m.meter.ExperimentalAttributeEnabled(key, stability)
 }
