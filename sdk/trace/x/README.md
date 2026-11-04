@@ -39,7 +39,7 @@ tp := sdktrace.NewTracerProvider(
 `WithMinimumStability` configures the minimum stability level (`StabilityStable` by default, or `StabilityDevelopment`) for Spans and attributes on a `TracerProvider`, working alongside `go.opentelemetry.io/otel/trace/x.WithStability`, `go.opentelemetry.io/otel/trace/x.Enabled`, and `go.opentelemetry.io/otel/trace/x.AttributeEnabled`.
 
 - Spans started with a stability level less than `minimum_stability` (such as `StabilityDevelopment` when `minimum_stability` is `StabilityStable`) return a non-recording `Span` without invoking the `IDGenerator`, `Sampler`, or any `SpanProcessor`, while preserving any parent `SpanContext` in the returned `Context`.
-- `AttributeEnabled(tracer, key, stability...)` returns `false` when there are no registered `SpanProcessor`s, after `Shutdown`, or when `stability` (defaulting to `StabilityStable`) is less than `minimum_stability`.
+- `AttributeEnabled(ctx, tracer, key, opts...)` returns `false` when there are no registered `SpanProcessor`s, after `Shutdown`, or when `stability` (defaulting to `StabilityStable`) is less than `minimum_stability`.
 - Setting `WithMinimumStability(StabilityDevelopment)` enables both `StabilityStable` and `StabilityDevelopment` Spans and attributes.
 
 ## Compatibility and Stability

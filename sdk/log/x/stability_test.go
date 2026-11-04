@@ -80,9 +80,9 @@ func TestLoggerMinimumStability(t *testing.T) {
 			assert.Equal(t, tc.wantStableRecorded, logx.Enabled(ctx, logger, logx.EnabledParameters{Stability: logx.StabilityStable}))
 
 			// Check AttributeEnabled for default (unspecified), explicit Stable, and Development.
-			assert.Equal(t, tc.wantStableRecorded, logx.AttributeEnabled(logger, "stable.attr"))
-			assert.Equal(t, tc.wantStableRecorded, logx.AttributeEnabled(logger, "stable.attr", logx.StabilityStable))
-			assert.Equal(t, tc.wantDevRecorded, logx.AttributeEnabled(logger, "dev.attr", logx.StabilityDevelopment))
+			assert.Equal(t, tc.wantStableRecorded, logx.AttributeEnabled(ctx, logger, "stable.attr"))
+			assert.Equal(t, tc.wantStableRecorded, logx.AttributeEnabled(ctx, logger, "stable.attr", logx.StabilityStable))
+			assert.Equal(t, tc.wantDevRecorded, logx.AttributeEnabled(ctx, logger, "dev.attr", logx.StabilityDevelopment))
 
 			enabledCallsBeforeDev := proc.enabledCalls.Load()
 			assert.Equal(t, tc.wantDevRecorded, logx.Enabled(ctx, logger, logx.EnabledParameters{Stability: logx.StabilityDevelopment}))
@@ -129,8 +129,8 @@ func TestLoggerAttributeEnabledWithoutProcessorsOrAfterShutdown(t *testing.T) {
 	// LoggerProvider with no Processors: AttributeEnabled is false.
 	lpNoProc := sdklog.NewLoggerProvider(sdklogx.WithMinimumStability(sdklogx.StabilityDevelopment))
 	loggerNoProc := lpNoProc.Logger("no-proc")
-	assert.False(t, logx.AttributeEnabled(loggerNoProc, "attr"))
-	assert.False(t, logx.AttributeEnabled(loggerNoProc, "attr", logx.StabilityDevelopment))
+	assert.False(t, logx.AttributeEnabled(ctx, loggerNoProc, "attr"))
+	assert.False(t, logx.AttributeEnabled(ctx, loggerNoProc, "attr", logx.StabilityDevelopment))
 
 	// LoggerProvider with a Processor: AttributeEnabled is true until Shutdown.
 	proc := &recordingProcessor{}
@@ -139,10 +139,10 @@ func TestLoggerAttributeEnabledWithoutProcessorsOrAfterShutdown(t *testing.T) {
 		sdklogx.WithMinimumStability(sdklogx.StabilityDevelopment),
 	)
 	logger := lp.Logger("with-proc")
-	assert.True(t, logx.AttributeEnabled(logger, "attr"))
-	assert.True(t, logx.AttributeEnabled(logger, "attr", logx.StabilityDevelopment))
+	assert.True(t, logx.AttributeEnabled(ctx, logger, "attr"))
+	assert.True(t, logx.AttributeEnabled(ctx, logger, "attr", logx.StabilityDevelopment))
 
 	require.NoError(t, lp.Shutdown(ctx))
-	assert.False(t, logx.AttributeEnabled(logger, "attr"))
-	assert.False(t, logx.AttributeEnabled(logger, "attr", logx.StabilityDevelopment))
+	assert.False(t, logx.AttributeEnabled(ctx, logger, "attr"))
+	assert.False(t, logx.AttributeEnabled(ctx, logger, "attr", logx.StabilityDevelopment))
 }

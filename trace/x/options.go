@@ -92,17 +92,17 @@ func Enabled(ctx context.Context, t trace.Tracer, opts ...trace.SpanStartOption)
 	return t != noop.Tracer{}
 }
 
-// AttributeEnabled reports whether t records an attribute with the given key
-// and options (defaulting to StabilityStable if not provided).
+// AttributeEnabled reports whether t records an attribute with the given
+// context, key, and options (defaulting to StabilityStable if not provided).
 //
 // Instrumentation should call AttributeEnabled before computing or attaching a
 // StabilityDevelopment attribute. It returns false if t is nil, a no-op
 // Tracer, or does not support attribute enablement.
 //
 // This function is experimental and may be changed or removed in a future release.
-func AttributeEnabled(t trace.Tracer, key attribute.Key, opts ...AttributeEnabledOption) bool {
+func AttributeEnabled(ctx context.Context, t trace.Tracer, key attribute.Key, opts ...AttributeEnabledOption) bool {
 	ae, ok := t.(interface {
-		ExperimentalAttributeEnabled(key attribute.Key, stability int) bool
+		ExperimentalAttributeEnabled(ctx context.Context, key attribute.Key, stability int) bool
 	})
 	if !ok {
 		return false
@@ -113,5 +113,5 @@ func AttributeEnabled(t trace.Tracer, key attribute.Key, opts ...AttributeEnable
 			cfg = opt.applyAttributeEnabled(cfg)
 		}
 	}
-	return ae.ExperimentalAttributeEnabled(key, int(cfg.stability))
+	return ae.ExperimentalAttributeEnabled(ctx, key, int(cfg.stability))
 }

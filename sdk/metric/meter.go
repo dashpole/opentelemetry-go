@@ -863,7 +863,7 @@ func isDisabledByDefault[T any](m *meter, opts []T) bool {
 // true if stability meets or exceeds the minimum stability of a Reader's
 // pipeline, or if an active View of that pipeline matching m's scope
 // explicitly includes key in its AttributeFilter.
-func (m *meter) ExperimentalAttributeEnabled(key attribute.Key, stability int) bool {
+func (m *meter) ExperimentalAttributeEnabled(_ context.Context, key attribute.Key, stability int) bool {
 	for i, p := range m.pipes {
 		if stability >= p.minimumStability {
 			return true

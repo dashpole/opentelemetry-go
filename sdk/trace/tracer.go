@@ -209,7 +209,7 @@ func (tr *tracer) Enabled(_ context.Context, options ...trace.SpanStartOption) b
 
 // ExperimentalAttributeEnabled reports whether an attribute with the given key and
 // stability level would be recorded by tr.
-func (tr *tracer) ExperimentalAttributeEnabled(_ attribute.Key, stability int) bool {
+func (tr *tracer) ExperimentalAttributeEnabled(_ context.Context, _ attribute.Key, stability int) bool {
 	if tr.provider.isShutdown.Load() {
 		return false
 	}

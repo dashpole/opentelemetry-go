@@ -4,6 +4,7 @@
 package global
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -20,7 +21,7 @@ import (
 // attributeEnabler enables attributes with a stability of at least Stable (0).
 type attributeEnabler struct{}
 
-func (attributeEnabler) ExperimentalAttributeEnabled(_ attribute.Key, stability int) bool {
+func (attributeEnabler) ExperimentalAttributeEnabled(_ context.Context, _ attribute.Key, stability int) bool {
 	return stability >= 0
 }
 
@@ -52,35 +53,38 @@ func (attributeEnabledLoggerProvider) Logger(string, ...log.LoggerOption) log.Lo
 }
 
 func TestTracerAttributeEnabled(t *testing.T) {
+	ctx := t.Context()
 	tp := &tracerProvider{}
 	tr := tp.Tracer("test").(*tracer)
-	assert.False(t, tr.ExperimentalAttributeEnabled("attr", 0), "no delegate")
+	assert.False(t, tr.ExperimentalAttributeEnabled(ctx, "attr", 0), "no delegate")
 
 	tp.setDelegate(fnTracerProvider{
 		tracer: func(string, ...trace.TracerOption) trace.Tracer { return attributeEnabledTracer{} },
 	})
-	assert.True(t, tr.ExperimentalAttributeEnabled("attr", 0))
-	assert.False(t, tr.ExperimentalAttributeEnabled("attr", -1))
+	assert.True(t, tr.ExperimentalAttributeEnabled(ctx, "attr", 0))
+	assert.False(t, tr.ExperimentalAttributeEnabled(ctx, "attr", -1))
 }
 
 func TestMeterAttributeEnabled(t *testing.T) {
+	ctx := t.Context()
 	mp := &meterProvider{}
 	m := mp.Meter("test").(*meter)
-	assert.False(t, m.ExperimentalAttributeEnabled("attr", 0), "no delegate")
+	assert.False(t, m.ExperimentalAttributeEnabled(ctx, "attr", 0), "no delegate")
 
 	mp.setDelegate(attributeEnabledMeterProvider{})
-	assert.True(t, m.ExperimentalAttributeEnabled("attr", 0))
-	assert.False(t, m.ExperimentalAttributeEnabled("attr", -1))
+	assert.True(t, m.ExperimentalAttributeEnabled(ctx, "attr", 0))
+	assert.False(t, m.ExperimentalAttributeEnabled(ctx, "attr", -1))
 }
 
 func TestLoggerAttributeEnabled(t *testing.T) {
+	ctx := t.Context()
 	lp := &loggerProvider{}
 	l := lp.Logger("test").(*logger)
-	assert.False(t, l.ExperimentalAttributeEnabled("attr", 0), "no delegate")
+	assert.False(t, l.ExperimentalAttributeEnabled(ctx, "attr", 0), "no delegate")
 
 	lp.setDelegate(attributeEnabledLoggerProvider{})
-	assert.True(t, l.ExperimentalAttributeEnabled("attr", 0))
-	assert.False(t, l.ExperimentalAttributeEnabled("attr", -1))
+	assert.True(t, l.ExperimentalAttributeEnabled(ctx, "attr", 0))
+	assert.False(t, l.ExperimentalAttributeEnabled(ctx, "attr", -1))
 }
 
 func TestTracerEnabledNoopDelegate(t *testing.T) {

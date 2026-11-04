@@ -132,17 +132,17 @@ func WithStability(s Stability) AttributeEnabledOption {
 	return stabilityOption{s: s}
 }
 
-// AttributeEnabled reports whether l records an attribute with the given key
-// and options (defaulting to StabilityStable if not provided).
+// AttributeEnabled reports whether l records an attribute with the given
+// context, key, and options (defaulting to StabilityStable if not provided).
 //
 // Instrumentation should call AttributeEnabled before computing or attaching a
 // StabilityDevelopment attribute. It returns false if l is nil, a no-op
 // Logger, or does not support attribute enablement.
 //
 // This function is experimental and may be changed or removed in a future release.
-func AttributeEnabled(l log.Logger, key attribute.Key, opts ...AttributeEnabledOption) bool {
+func AttributeEnabled(ctx context.Context, l log.Logger, key attribute.Key, opts ...AttributeEnabledOption) bool {
 	ae, ok := l.(interface {
-		ExperimentalAttributeEnabled(key attribute.Key, stability int) bool
+		ExperimentalAttributeEnabled(ctx context.Context, key attribute.Key, stability int) bool
 	})
 	if !ok {
 		return false
@@ -153,5 +153,5 @@ func AttributeEnabled(l log.Logger, key attribute.Key, opts ...AttributeEnabledO
 			cfg = opt.applyAttributeEnabled(cfg)
 		}
 	}
-	return ae.ExperimentalAttributeEnabled(key, int(cfg.stability))
+	return ae.ExperimentalAttributeEnabled(ctx, key, int(cfg.stability))
 }

@@ -337,6 +337,6 @@ func (m *configuratorMeter) RegisterCallback(
 // ExperimentalAttributeEnabled reports whether an attribute with the given key and
 // stability level would be recorded by m. It returns false when m is disabled
 // by the MeterConfigurator.
-func (m *configuratorMeter) ExperimentalAttributeEnabled(key attribute.Key, stability int) bool {
-	return m.config.Load() && m.meter.ExperimentalAttributeEnabled(key, stability)
+func (m *configuratorMeter) ExperimentalAttributeEnabled(ctx context.Context, key attribute.Key, stability int) bool {
+	return m.config.Load() && m.meter.ExperimentalAttributeEnabled(ctx, key, stability)
 }

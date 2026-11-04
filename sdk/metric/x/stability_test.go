@@ -646,14 +646,15 @@ func TestDevelopmentStabilityWithFinishAndMeterConfigurator(t *testing.T) {
 }
 
 func TestMeterAttributeEnabled(t *testing.T) {
+	ctx := t.Context()
 	dev := metricx.StabilityDevelopment
 	scope := instrumentation.Scope{Name: "test"}
 
 	t.Run("NoReaders", func(t *testing.T) {
 		mp := sdkmetric.NewMeterProvider(x.WithMinimumStability(x.StabilityDevelopment))
 		m := mp.Meter("test")
-		assert.False(t, metricx.AttributeEnabled(m, "stable.attr"))
-		assert.False(t, metricx.AttributeEnabled(m, "dev.attr", dev))
+		assert.False(t, metricx.AttributeEnabled(ctx, m, "stable.attr"))
+		assert.False(t, metricx.AttributeEnabled(ctx, m, "dev.attr", dev))
 	})
 
 	for _, tc := range []struct {
@@ -668,9 +669,9 @@ func TestMeterAttributeEnabled(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			opts := append([]sdkmetric.Option{sdkmetric.WithReader(sdkmetric.NewManualReader())}, tc.opts...)
 			m := sdkmetric.NewMeterProvider(opts...).Meter("test")
-			assert.True(t, metricx.AttributeEnabled(m, "stable.attr"))
-			assert.True(t, metricx.AttributeEnabled(m, "stable.attr", metricx.StabilityStable))
-			assert.Equal(t, tc.wantDev, metricx.AttributeEnabled(m, "dev.attr", dev))
+			assert.True(t, metricx.AttributeEnabled(ctx, m, "stable.attr"))
+			assert.True(t, metricx.AttributeEnabled(ctx, m, "stable.attr", metricx.StabilityStable))
+			assert.Equal(t, tc.wantDev, metricx.AttributeEnabled(ctx, m, "dev.attr", dev))
 		})
 	}
 
@@ -682,14 +683,14 @@ func TestMeterAttributeEnabled(t *testing.T) {
 			x.WithMinimumStability(x.StabilityDevelopment),
 		)
 		m := mp.Meter("test")
-		assert.True(t, metricx.AttributeEnabled(m, "stable.attr"))
-		assert.True(t, metricx.AttributeEnabled(m, "dev.attr", dev))
+		assert.True(t, metricx.AttributeEnabled(ctx, m, "stable.attr"))
+		assert.True(t, metricx.AttributeEnabled(ctx, m, "dev.attr", dev))
 
 		handle.Set(func(instrumentation.Scope) x.MeterConfig {
 			return x.NewMeterConfig(x.WithMeterEnabled(false))
 		})
-		assert.False(t, metricx.AttributeEnabled(m, "stable.attr"))
-		assert.False(t, metricx.AttributeEnabled(m, "dev.attr", dev))
+		assert.False(t, metricx.AttributeEnabled(ctx, m, "stable.attr"))
+		assert.False(t, metricx.AttributeEnabled(ctx, m, "dev.attr", dev))
 	})
 
 	t.Run("ViewIncludesDevelopmentAttribute", func(t *testing.T) {
@@ -704,12 +705,12 @@ func TestMeterAttributeEnabled(t *testing.T) {
 			sdkmetric.WithView(view),
 		)
 		m := mp.Meter("test")
-		assert.True(t, metricx.AttributeEnabled(m, "url.template", dev))
-		assert.False(t, metricx.AttributeEnabled(m, "http.request.body.size", dev))
+		assert.True(t, metricx.AttributeEnabled(ctx, m, "url.template", dev))
+		assert.False(t, metricx.AttributeEnabled(ctx, m, "http.request.body.size", dev))
 		// Stable attributes are not affected by the View.
-		assert.True(t, metricx.AttributeEnabled(m, "server.address"))
+		assert.True(t, metricx.AttributeEnabled(ctx, m, "server.address"))
 		// The View does not match the "other" Meter.
-		assert.False(t, metricx.AttributeEnabled(mp.Meter("other"), "url.template", dev))
+		assert.False(t, metricx.AttributeEnabled(ctx, mp.Meter("other"), "url.template", dev))
 	})
 
 	t.Run("ViewIncludeOverrides", func(t *testing.T) {
@@ -771,7 +772,7 @@ func TestMeterAttributeEnabled(t *testing.T) {
 				if tc.configure != nil {
 					tc.configure(handle)
 				}
-				assert.Equal(t, tc.want, metricx.AttributeEnabled(m, "url.template", dev))
+				assert.Equal(t, tc.want, metricx.AttributeEnabled(ctx, m, "url.template", dev))
 			})
 		}
 	})
@@ -786,7 +787,7 @@ func TestMeterAttributeEnabled(t *testing.T) {
 				sdkmetric.Stream{AttributeFilter: attribute.NewAllowKeysFilter("url.template")},
 			)),
 		)
-		assert.True(t, metricx.AttributeEnabled(mp.Meter("test"), "url.template", dev))
+		assert.True(t, metricx.AttributeEnabled(ctx, mp.Meter("test"), "url.template", dev))
 	})
 
 	t.Run("Concurrent", func(t *testing.T) {
@@ -804,7 +805,7 @@ func TestMeterAttributeEnabled(t *testing.T) {
 		for range 4 {
 			wg.Go(func() {
 				for range 100 {
-					_ = metricx.AttributeEnabled(m, "url.template", dev)
+					_ = metricx.AttributeEnabled(ctx, m, "url.template", dev)
 				}
 			})
 		}
@@ -814,7 +815,7 @@ func TestMeterAttributeEnabled(t *testing.T) {
 			})
 		})
 		wg.Wait()
-		assert.False(t, metricx.AttributeEnabled(m, "url.template", dev))
+		assert.False(t, metricx.AttributeEnabled(ctx, m, "url.template", dev))
 	})
 
 	t.Run("DenyFilterDoesNotIncludeDevelopmentAttribute", func(t *testing.T) {
@@ -826,6 +827,6 @@ func TestMeterAttributeEnabled(t *testing.T) {
 			sdkmetric.WithReader(sdkmetric.NewManualReader()),
 			sdkmetric.WithView(view),
 		)
-		assert.False(t, metricx.AttributeEnabled(mp.Meter("test"), "url.template", dev))
+		assert.False(t, metricx.AttributeEnabled(ctx, mp.Meter("test"), "url.template", dev))
 	})
 }

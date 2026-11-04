@@ -145,7 +145,7 @@ func (l *logger) ExperimentalEnabled(ctx context.Context, param log.EnabledParam
 
 // ExperimentalAttributeEnabled reports whether an attribute with the given key and
 // stability level would be recorded by l.
-func (l *logger) ExperimentalAttributeEnabled(_ attribute.Key, stability int) bool {
+func (l *logger) ExperimentalAttributeEnabled(_ context.Context, _ attribute.Key, stability int) bool {
 	if len(l.provider.processors) == 0 || l.provider.stopped.Load() {
 		return false
 	}

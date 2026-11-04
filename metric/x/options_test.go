@@ -4,6 +4,7 @@
 package x_test
 
 import (
+	"context"
 	"slices"
 	"testing"
 
@@ -117,16 +118,17 @@ type mockAttributeEnabledMeter struct {
 	gotStability int
 }
 
-func (m *mockAttributeEnabledMeter) ExperimentalAttributeEnabled(key attribute.Key, stability int) bool {
+func (m *mockAttributeEnabledMeter) ExperimentalAttributeEnabled(_ context.Context, key attribute.Key, stability int) bool {
 	m.gotKey, m.gotStability = key, stability
 	return stability >= 0
 }
 
 func TestAttributeEnabled(t *testing.T) {
-	if x.AttributeEnabled(nil, "k") {
-		t.Fatal("expected AttributeEnabled(nil, \"k\") to be false")
+	ctx := t.Context()
+	if x.AttributeEnabled(ctx, nil, "k") {
+		t.Fatal("expected AttributeEnabled(ctx, nil, \"k\") to be false")
 	}
-	if x.AttributeEnabled(noop.NewMeterProvider().Meter("test"), "k") {
+	if x.AttributeEnabled(ctx, noop.NewMeterProvider().Meter("test"), "k") {
 		t.Fatal("expected AttributeEnabled on a no-op Meter to be false")
 	}
 
@@ -142,7 +144,7 @@ func TestAttributeEnabled(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := &mockAttributeEnabledMeter{}
-			got := x.AttributeEnabled(m, "attr", tc.opts...)
+			got := x.AttributeEnabled(ctx, m, "attr", tc.opts...)
 			if want := tc.want == x.StabilityStable; got != want {
 				t.Fatalf("AttributeEnabled() = %t, want %t", got, want)
 			}

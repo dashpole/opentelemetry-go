@@ -519,14 +519,14 @@ func (m *meter) RegisterCallback(f metric.Callback, insts ...metric.Observable) 
 // ExperimentalAttributeEnabled reports whether an attribute with the given key and
 // stability level would be recorded by forwarding the call to m.delegate if
 // set, otherwise returning false.
-func (m *meter) ExperimentalAttributeEnabled(key attribute.Key, stability int) bool {
+func (m *meter) ExperimentalAttributeEnabled(ctx context.Context, key attribute.Key, stability int) bool {
 	m.mtx.Lock()
 	delegate := m.delegate
 	m.mtx.Unlock()
 	ae, ok := delegate.(interface {
-		ExperimentalAttributeEnabled(key attribute.Key, stability int) bool
+		ExperimentalAttributeEnabled(ctx context.Context, key attribute.Key, stability int) bool
 	})
-	return ok && ae.ExperimentalAttributeEnabled(key, stability)
+	return ok && ae.ExperimentalAttributeEnabled(ctx, key, stability)
 }
 
 func unwrapInstruments(instruments []metric.Observable) []metric.Observable {

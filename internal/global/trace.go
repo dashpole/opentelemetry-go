@@ -169,11 +169,11 @@ func (t *tracer) Enabled(ctx context.Context, opts ...trace.SpanStartOption) boo
 // ExperimentalAttributeEnabled reports whether an attribute with the given key and
 // stability level would be recorded by forwarding the call to t.delegate if
 // set, otherwise returning false.
-func (t *tracer) ExperimentalAttributeEnabled(key attribute.Key, stability int) bool {
+func (t *tracer) ExperimentalAttributeEnabled(ctx context.Context, key attribute.Key, stability int) bool {
 	ae, ok := t.delegate.Load().(interface {
-		ExperimentalAttributeEnabled(key attribute.Key, stability int) bool
+		ExperimentalAttributeEnabled(ctx context.Context, key attribute.Key, stability int) bool
 	})
-	return ok && ae.ExperimentalAttributeEnabled(key, stability)
+	return ok && ae.ExperimentalAttributeEnabled(ctx, key, stability)
 }
 
 // autoInstEnabled determines if the auto-instrumentation SDK span is returned

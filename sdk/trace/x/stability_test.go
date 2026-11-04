@@ -93,9 +93,9 @@ func TestTracerMinimumStability(t *testing.T) {
 			assert.Equal(t, tc.wantDevRecorded, tracex.Enabled(ctx, tr, tracex.WithStability(tracex.StabilityDevelopment)))
 
 			// Check AttributeEnabled for default (unspecified), explicit Stable, and Development.
-			assert.Equal(t, tc.wantStableRecorded, tracex.AttributeEnabled(tr, "stable.attr"))
-			assert.Equal(t, tc.wantStableRecorded, tracex.AttributeEnabled(tr, "stable.attr", tracex.StabilityStable))
-			assert.Equal(t, tc.wantDevRecorded, tracex.AttributeEnabled(tr, "dev.attr", tracex.StabilityDevelopment))
+			assert.Equal(t, tc.wantStableRecorded, tracex.AttributeEnabled(ctx, tr, "stable.attr"))
+			assert.Equal(t, tc.wantStableRecorded, tracex.AttributeEnabled(ctx, tr, "stable.attr", tracex.StabilityStable))
+			assert.Equal(t, tc.wantDevRecorded, tracex.AttributeEnabled(ctx, tr, "dev.attr", tracex.StabilityDevelopment))
 
 			// 1. Default span (no WithStability option -> StabilityStable)
 			parentCtx, defaultSpan := tr.Start(ctx, "default-span")
@@ -161,8 +161,8 @@ func TestTracerEnabledWithoutProcessorsOrAfterShutdown(t *testing.T) {
 	tpNoProc := sdktrace.NewTracerProvider(sdktracex.WithMinimumStability(sdktracex.StabilityDevelopment))
 	trNoProc := tpNoProc.Tracer("no-proc")
 	assert.False(t, tracex.Enabled(ctx, trNoProc))
-	assert.False(t, tracex.AttributeEnabled(trNoProc, "attr"))
-	assert.False(t, tracex.AttributeEnabled(trNoProc, "attr", tracex.StabilityDevelopment))
+	assert.False(t, tracex.AttributeEnabled(ctx, trNoProc, "attr"))
+	assert.False(t, tracex.AttributeEnabled(ctx, trNoProc, "attr", tracex.StabilityDevelopment))
 
 	// TracerProvider with a SpanProcessor: Enabled and AttributeEnabled are true until Shutdown.
 	sr := tracetest.NewSpanRecorder()
@@ -172,11 +172,11 @@ func TestTracerEnabledWithoutProcessorsOrAfterShutdown(t *testing.T) {
 	)
 	tr := tp.Tracer("with-proc")
 	assert.True(t, tracex.Enabled(ctx, tr))
-	assert.True(t, tracex.AttributeEnabled(tr, "attr"))
-	assert.True(t, tracex.AttributeEnabled(tr, "attr", tracex.StabilityDevelopment))
+	assert.True(t, tracex.AttributeEnabled(ctx, tr, "attr"))
+	assert.True(t, tracex.AttributeEnabled(ctx, tr, "attr", tracex.StabilityDevelopment))
 
 	require.NoError(t, tp.Shutdown(ctx))
 	assert.False(t, tracex.Enabled(ctx, tr))
-	assert.False(t, tracex.AttributeEnabled(tr, "attr"))
-	assert.False(t, tracex.AttributeEnabled(tr, "attr", tracex.StabilityDevelopment))
+	assert.False(t, tracex.AttributeEnabled(ctx, tr, "attr"))
+	assert.False(t, tracex.AttributeEnabled(ctx, tr, "attr", tracex.StabilityDevelopment))
 }

@@ -15,5 +15,5 @@ They may be changed in backwards-incompatible ways, or removed entirely.
 `WithMinimumStability` configures the minimum stability level (`StabilityStable` by default, or `StabilityDevelopment`) for log `Record`s and attributes on a `LoggerProvider`, working alongside `go.opentelemetry.io/otel/log/x.Record`, `go.opentelemetry.io/otel/log/x.Emit`, `go.opentelemetry.io/otel/log/x.Enabled`, and `go.opentelemetry.io/otel/log/x.AttributeEnabled`.
 
 - Records emitted with a stability level less than `minimum_stability` (such as `StabilityDevelopment` when `minimum_stability` is `StabilityStable`) are dropped before invoking any `Processor`.
-- `AttributeEnabled(logger, key, stability...)` returns `false` when there are no registered `Processor`s, after `Shutdown`, or when `stability` (defaulting to `StabilityStable`) is less than `minimum_stability`.
+- `AttributeEnabled(ctx, logger, key, opts...)` returns `false` when there are no registered `Processor`s, after `Shutdown`, or when `stability` (defaulting to `StabilityStable`) is less than `minimum_stability`.
 - Setting `WithMinimumStability(StabilityDevelopment)` enables both `StabilityStable` and `StabilityDevelopment` log `Record`s and attributes.

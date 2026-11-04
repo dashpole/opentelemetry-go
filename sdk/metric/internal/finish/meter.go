@@ -4,6 +4,8 @@
 package finish
 
 import (
+	"context"
+
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -33,9 +35,9 @@ func (m *meter) Float64Counter(name string, options ...metric.Float64CounterOpti
 }
 
 // ExperimentalAttributeEnabled forwards to the decorated Meter.
-func (m *meter) ExperimentalAttributeEnabled(key attribute.Key, stability int) bool {
+func (m *meter) ExperimentalAttributeEnabled(ctx context.Context, key attribute.Key, stability int) bool {
 	ae, ok := m.Meter.(interface {
-		ExperimentalAttributeEnabled(key attribute.Key, stability int) bool
+		ExperimentalAttributeEnabled(ctx context.Context, key attribute.Key, stability int) bool
 	})
-	return ok && ae.ExperimentalAttributeEnabled(key, stability)
+	return ok && ae.ExperimentalAttributeEnabled(ctx, key, stability)
 }

@@ -123,9 +123,9 @@ func (l *logger) ExperimentalEnabled(ctx context.Context, param log.EnabledParam
 // ExperimentalAttributeEnabled reports whether an attribute with the given key and
 // stability level would be recorded by forwarding the call to the delegate if
 // set, otherwise returning false.
-func (l *logger) ExperimentalAttributeEnabled(key attribute.Key, stability int) bool {
+func (l *logger) ExperimentalAttributeEnabled(ctx context.Context, key attribute.Key, stability int) bool {
 	ae, ok := l.delegate.Load().(interface {
-		ExperimentalAttributeEnabled(key attribute.Key, stability int) bool
+		ExperimentalAttributeEnabled(ctx context.Context, key attribute.Key, stability int) bool
 	})
-	return ok && ae.ExperimentalAttributeEnabled(key, stability)
+	return ok && ae.ExperimentalAttributeEnabled(ctx, key, stability)
 }

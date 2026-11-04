@@ -5,6 +5,8 @@
 package x
 
 import (
+	"context"
+
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -110,17 +112,17 @@ func WithStability(s Stability) InstrumentAttributeOption {
 	return stabilityOption{s: s}
 }
 
-// AttributeEnabled reports whether m records an attribute with the given key
-// and options (defaulting to StabilityStable if not provided).
+// AttributeEnabled reports whether m records an attribute with the given
+// context, key, and options (defaulting to StabilityStable if not provided).
 //
 // Instrumentation should call AttributeEnabled before computing or attaching a
 // StabilityDevelopment attribute. It returns false if m is nil, a no-op
 // Meter, or does not support attribute enablement.
 //
 // This function is experimental and may be changed or removed in a future release.
-func AttributeEnabled(m metric.Meter, key attribute.Key, opts ...AttributeEnabledOption) bool {
+func AttributeEnabled(ctx context.Context, m metric.Meter, key attribute.Key, opts ...AttributeEnabledOption) bool {
 	ae, ok := m.(interface {
-		ExperimentalAttributeEnabled(key attribute.Key, stability int) bool
+		ExperimentalAttributeEnabled(ctx context.Context, key attribute.Key, stability int) bool
 	})
 	if !ok {
 		return false
@@ -131,7 +133,7 @@ func AttributeEnabled(m metric.Meter, key attribute.Key, opts ...AttributeEnable
 			cfg = opt.applyAttributeEnabled(cfg)
 		}
 	}
-	return ae.ExperimentalAttributeEnabled(key, int(cfg.stability))
+	return ae.ExperimentalAttributeEnabled(ctx, key, int(cfg.stability))
 }
 
 // Settable is an optional interface that Options can implement
