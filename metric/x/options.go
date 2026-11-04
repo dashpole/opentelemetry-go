@@ -60,6 +60,27 @@ const (
 	StabilityStable Stability = 0
 )
 
+// AttributeEnabledOption applies a configuration option to [AttributeEnabled].
+type AttributeEnabledOption interface {
+	applyAttributeEnabled(attributeEnabledConfig) attributeEnabledConfig
+}
+
+type attributeEnabledConfig struct {
+	stability Stability
+}
+
+func (s Stability) applyAttributeEnabled(c attributeEnabledConfig) attributeEnabledConfig {
+	c.stability = s
+	return c
+}
+
+// InstrumentAttributeOption applies a configuration option to both instrument
+// creation and [AttributeEnabled].
+type InstrumentAttributeOption interface {
+	metric.InstrumentOption
+	AttributeEnabledOption
+}
+
 type stabilityOption struct {
 	metric.InstrumentOption
 	s Stability
@@ -72,43 +93,45 @@ func (o stabilityOption) Stability() int {
 	return int(o.s)
 }
 
-// WithStability returns a [metric.InstrumentOption] that sets the stability
-// advisory parameter of an instrument.
+func (o stabilityOption) applyAttributeEnabled(c attributeEnabledConfig) attributeEnabledConfig {
+	c.stability = o.s
+	return c
+}
+
+// WithStability returns an [InstrumentAttributeOption] that sets the stability
+// advisory parameter of an instrument or an [AttributeEnabled] check.
 //
 // By default, instruments have [StabilityStable]. Instruments configured with
 // [StabilityDevelopment] use the drop aggregation by default when the
 // MeterProvider's minimum stability is [StabilityStable], unless explicitly
 // enabled by a View or when the MeterProvider's minimum stability is set to
 // [StabilityDevelopment].
-func WithStability(s Stability) metric.InstrumentOption {
+func WithStability(s Stability) InstrumentAttributeOption {
 	return stabilityOption{s: s}
 }
 
 // AttributeEnabled reports whether m records an attribute with the given key
-// and stability level (StabilityStable if not provided). If more than one
-// stability is provided, the last one is used.
-//
-// The variadic stability parameter keeps the call site
-// AttributeEnabled(m, key, StabilityDevelopment) unchanged if additional
-// parameters are added later as options that Stability also implements.
+// and options (defaulting to StabilityStable if not provided).
 //
 // Instrumentation should call AttributeEnabled before computing or attaching a
 // StabilityDevelopment attribute. It returns false if m is nil, a no-op
 // Meter, or does not support attribute enablement.
 //
 // This function is experimental and may be changed or removed in a future release.
-func AttributeEnabled(m metric.Meter, key attribute.Key, stability ...Stability) bool {
+func AttributeEnabled(m metric.Meter, key attribute.Key, opts ...AttributeEnabledOption) bool {
 	ae, ok := m.(interface {
 		ExperimentalAttributeEnabled(key attribute.Key, stability int) bool
 	})
 	if !ok {
 		return false
 	}
-	s := StabilityStable
-	if len(stability) > 0 {
-		s = stability[len(stability)-1]
+	cfg := attributeEnabledConfig{stability: StabilityStable}
+	for _, opt := range opts {
+		if opt != nil {
+			cfg = opt.applyAttributeEnabled(cfg)
+		}
 	}
-	return ae.ExperimentalAttributeEnabled(key, int(s))
+	return ae.ExperimentalAttributeEnabled(key, int(cfg.stability))
 }
 
 // Settable is an optional interface that Options can implement

@@ -131,17 +131,18 @@ func TestAttributeEnabled(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name      string
-		stability []x.Stability
-		want      x.Stability
+		name string
+		opts []x.AttributeEnabledOption
+		want x.Stability
 	}{
 		{name: "Default", want: x.StabilityStable},
-		{name: "Stable", stability: []x.Stability{x.StabilityStable}, want: x.StabilityStable},
-		{name: "Development", stability: []x.Stability{x.StabilityDevelopment}, want: x.StabilityDevelopment},
+		{name: "Stable", opts: []x.AttributeEnabledOption{x.StabilityStable}, want: x.StabilityStable},
+		{name: "Development", opts: []x.AttributeEnabledOption{x.StabilityDevelopment}, want: x.StabilityDevelopment},
+		{name: "WithStability(Development)", opts: []x.AttributeEnabledOption{x.WithStability(x.StabilityDevelopment)}, want: x.StabilityDevelopment},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := &mockAttributeEnabledMeter{}
-			got := x.AttributeEnabled(m, "attr", tc.stability...)
+			got := x.AttributeEnabled(m, "attr", tc.opts...)
 			if want := tc.want == x.StabilityStable; got != want {
 				t.Fatalf("AttributeEnabled() = %t, want %t", got, want)
 			}

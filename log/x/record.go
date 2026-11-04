@@ -100,29 +100,58 @@ func Enabled(ctx context.Context, l log.Logger, param EnabledParameters) bool {
 	return l.Enabled(ctx, p)
 }
 
-// AttributeEnabled reports whether l records an attribute with the given key
-// and stability level (StabilityStable if not provided). If more than one
-// stability is provided, the last one is used.
+// AttributeEnabledOption applies a configuration option to [AttributeEnabled].
+type AttributeEnabledOption interface {
+	applyAttributeEnabled(attributeEnabledConfig) attributeEnabledConfig
+}
+
+type attributeEnabledConfig struct {
+	stability Stability
+}
+
+func (s Stability) applyAttributeEnabled(c attributeEnabledConfig) attributeEnabledConfig {
+	c.stability = s
+	return c
+}
+
+type stabilityOption struct {
+	s Stability
+}
+
+func (o stabilityOption) applyAttributeEnabled(c attributeEnabledConfig) attributeEnabledConfig {
+	c.stability = o.s
+	return c
+}
+
+// WithStability sets the [Stability] level for [AttributeEnabled].
 //
-// The variadic stability parameter keeps the call site
-// AttributeEnabled(l, key, StabilityDevelopment) unchanged if additional
-// parameters are added later as options that Stability also implements.
+// If not provided, [AttributeEnabled] defaults to [StabilityStable].
+//
+// This option is experimental and may be changed or removed in a future release.
+func WithStability(s Stability) AttributeEnabledOption {
+	return stabilityOption{s: s}
+}
+
+// AttributeEnabled reports whether l records an attribute with the given key
+// and options (defaulting to StabilityStable if not provided).
 //
 // Instrumentation should call AttributeEnabled before computing or attaching a
 // StabilityDevelopment attribute. It returns false if l is nil, a no-op
 // Logger, or does not support attribute enablement.
 //
 // This function is experimental and may be changed or removed in a future release.
-func AttributeEnabled(l log.Logger, key attribute.Key, stability ...Stability) bool {
+func AttributeEnabled(l log.Logger, key attribute.Key, opts ...AttributeEnabledOption) bool {
 	ae, ok := l.(interface {
 		ExperimentalAttributeEnabled(key attribute.Key, stability int) bool
 	})
 	if !ok {
 		return false
 	}
-	s := StabilityStable
-	if len(stability) > 0 {
-		s = stability[len(stability)-1]
+	cfg := attributeEnabledConfig{stability: StabilityStable}
+	for _, opt := range opts {
+		if opt != nil {
+			cfg = opt.applyAttributeEnabled(cfg)
+		}
 	}
-	return ae.ExperimentalAttributeEnabled(key, int(s))
+	return ae.ExperimentalAttributeEnabled(key, int(cfg.stability))
 }
